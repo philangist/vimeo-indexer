@@ -1,0 +1,35 @@
+version: '3'
+services:
+  users:
+    build:
+      context: .
+      dockerfile: $PWD/docker/users/Dockerfile
+    command: ["./challenge-linux", "users", "-d", "-p", "8000"]
+    environment:
+      - GIN_MODE
+    ports:
+      - 8000:8000
+    volumes:
+      - .:/users-service/
+  videos:
+    build:
+      context: .
+      dockerfile: $PWD/docker/videos/Dockerfile
+    command: ["./challenge-linux", "videos", "-d", "-p", "8001"]
+    environment:
+      - GIN_MODE
+    ports:
+      - 8001:8001
+    volumes:
+      - .:/videos-service/
+  index:
+    build:
+      context: .
+      dockerfile: $PWD/docker/index/Dockerfile
+    command: ["./challenge-linux", "index", "-d", "-p", "8002"]
+    environment:
+      - GIN_MODE
+    ports:
+      - 8002:8002
+    volumes:
+      - .:/index-service/

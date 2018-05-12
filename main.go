@@ -6,8 +6,8 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
+	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -47,66 +47,84 @@ type Index struct {
 	Video Video `json:"video"`
 }
 
-func ParseCSVStream(scanner *bufio.Scanner) (<-chan [2]string, error) {
-	channel := make(chan [2]string)
-	go func () {
-		for scanner.Scan(){
-			line := strings.Split(scanner.Text(), ",")
-			channel <- [2]string{line[0], line[1]}
-		}
-		close(channel)
-	}()
+func main(){
+	start := time.Now()
+	httpClient := &http.Client{Timeout: time.Second * 10}
+	inputStream := make(chan [2]string, 1)
+	userIndexes := make(chan Index, 1)
 
-	return channel, nil
+	go parseCSVStream(bufio.NewScanner(os.Stdin), inputStream)
+	go fetchUsersVideosData(httpClient, inputStream, userIndexes)
+	indexUsersVideosData(httpClient, userIndexes)
+
+	elapsed := time.Since(start)
+	log.Printf("Indexing took %s", elapsed)
 }
 
-func main(){
-	httpClient := &http.Client{Timeout: time.Second * 10}
-	var userResponse UserResponse
-	var videoResponse VideoResponse
-
-	var userIndex Index
-	// userIndexes := make(map[string][]Index)
-	var userIndexes []Index
-
-	failed := [][2]string{}
-
-	dataStream, err := ParseCSVStream(bufio.NewScanner(os.Stdin))
-	if err != nil {
-		log.Panic(err)
+func parseCSVStream(scanner *bufio.Scanner, channel chan [2]string) {
+/*	inputStream := [][2]string{
+		{"123","456"},
+		{"456","123"},
 	}
 
-	for data := range dataStream {
+	for _, line := range inputStream {*/
+
+        for scanner.Scan(){
+		line := strings.Split(scanner.Text(), ",")
+		scanner.Scan()
+		fmt.Printf("sending line %v to inputStream channel\n", line)
+		channel <- [2]string{line[0], line[1]}
+	}
+	defer close(channel)
+	fmt.Println("Done parseCSVStream")
+}
+
+func fetchUsersVideosData(httpClient *http.Client, inputStream chan [2]string, userIndexes chan Index) {
+	var userResponse UserResponse
+	var videoResponse VideoResponse
+	var userIndex Index
+
+	for data, ok := <- inputStream; ok; data, ok = <- inputStream {
+		failed := false
 		userID, videoID := data[0], data[1]
-		appended := false
+
+		fmt.Printf("Reading line %v from inputStream channel\n", data)
 
 		err := getUserData(httpClient, userID, &userResponse)
 		if err == nil {
 			userIndex.User = userResponse.Data
 		} else {
-			appended = true
-			failed = append(failed, data)
+			failed = true
 		}
 
 		err = getVideoData(httpClient, videoID, &videoResponse)
 		if err == nil {
 			userIndex.Video = videoResponse.Data
 		} else {
-			if !appended {
-				failed = append(failed, data)
-			}
+			failed = failed || true
 		}
-		userIndexes = append(userIndexes, userIndex)
-	}
 
-	for _, userIndex := range userIndexes {
+		/*if failed {
+			inputStream <- data
+		}*/
+
+		fmt.Println("data is ", data)
+		userIndexes <- userIndex
+	}
+	defer close(userIndexes)
+	fmt.Println("Done fetchUsersVideosData")
+}
+
+func indexUsersVideosData(httpClient *http.Client, userIndexes chan Index){
+	for userIndex := range userIndexes {
+		fmt.Printf("Posting userIndex %v to index service\n", userIndex)
 		err := postIndexData(httpClient, userIndex)
 		if err != nil {
+			fmt.Println("error indexing user data", err)
 		}
 	}
 
-	fmt.Println("userIndexes are ", userIndexes)
-	fmt.Printf("Failed requests were %s\n", failed)
+	fmt.Println("Done indexUsersVideosData")
 }
 
 func postIndexData(httpClient *http.Client, userIndex Index) error {
@@ -145,7 +163,6 @@ func getUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 		fmt.Printf("Error %s requesting URL %s", err, userURL)
 	}
 
-	// Check that the server actually sent compressed data
 	var reader io.ReadCloser
 	switch response.Header.Get("Content-Encoding") {
 	case "gzip":

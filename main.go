@@ -9,9 +9,17 @@ import (
 	"log"
 	"io"
 	"net/http"
+	// _ "net/http/pprof"
 	"os"
+	// "runtime/pprof"
 	"strings"
+	"sync"
 	"time"
+)
+
+const (
+	MEMPROF = "perf/memprof-%s"
+	CPUPROF = "perf/cpuprof-%s"
 )
 
 type User struct {
@@ -49,82 +57,78 @@ type Index struct {
 
 func main(){
 	start := time.Now()
-	httpClient := &http.Client{Timeout: time.Second * 10}
+	httpClient := &http.Client{Timeout: time.Second * 3}
 	inputStream := make(chan [2]string, 1)
-	userIndexes := make(chan Index, 1)
+	wg := &sync.WaitGroup{}
+
+	handler := func(wg *sync.WaitGroup){
+		for value, ok := <- inputStream; ok; value, ok = <- inputStream{
+			_, err := fetchUserVideoData(value[0], value[1], httpClient)
+			if err != nil {
+				inputStream <- value
+			}
+		}
+		wg.Done()
+	}
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go handler(wg)
+	}
 
 	go parseCSVStream(bufio.NewScanner(os.Stdin), inputStream)
-	go fetchUsersVideosData(httpClient, inputStream, userIndexes)
-	indexUsersVideosData(httpClient, userIndexes)
+	func(){
+		wg.Wait()
+		defer close(inputStream)
+	}()
 
-	elapsed := time.Since(start)
-	log.Printf("Indexing took %s", elapsed)
+	// time.Sleep(10 * time.Second)
+	fmt.Println("Elapsed time was: ", time.Since(start))
 }
 
-func parseCSVStream(scanner *bufio.Scanner, channel chan [2]string) {
-/*	inputStream := [][2]string{
-		{"123","456"},
-		{"456","123"},
-	}
 
-	for _, line := range inputStream {*/
-
+func parseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
         for scanner.Scan(){
-		line := strings.Split(scanner.Text(), ",")
-		scanner.Scan()
-		fmt.Printf("sending line %v to inputStream channel\n", line)
-		channel <- [2]string{line[0], line[1]}
+ 		line := strings.Split(scanner.Text(), ",")
+		inputStream <- [2]string{line[0], line[1]}
+		fmt.Printf("Sending line %v to inputStream\n", line)
 	}
-	defer close(channel)
-	fmt.Println("Done parseCSVStream")
 }
 
-func fetchUsersVideosData(httpClient *http.Client, inputStream chan [2]string, userIndexes chan Index) {
+func fetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIndex Index, err error) {
 	var userResponse UserResponse
 	var videoResponse VideoResponse
-	var userIndex Index
 
-	for data, ok := <- inputStream; ok; data, ok = <- inputStream {
-		failed := false
-		userID, videoID := data[0], data[1]
+	fmt.Printf("fetching userID: %s and videoID: %s\n", userID, videoID)
 
-		fmt.Printf("Reading line %v from inputStream channel\n", data)
-
-		err := getUserData(httpClient, userID, &userResponse)
-		if err == nil {
-			userIndex.User = userResponse.Data
-		} else {
-			failed = true
-		}
-
-		err = getVideoData(httpClient, videoID, &videoResponse)
-		if err == nil {
-			userIndex.Video = videoResponse.Data
-		} else {
-			failed = failed || true
-		}
-
-		/*if failed {
-			inputStream <- data
-		}*/
-
-		fmt.Println("data is ", data)
-		userIndexes <- userIndex
+	err = getUserData(httpClient, userID, &userResponse)
+	if err == nil {
+		userIndex.User = userResponse.Data
+	} else {
+		fmt.Printf(
+			"Get user failed for userID %s\n", userID)
+		return userIndex, err
 	}
-	defer close(userIndexes)
-	fmt.Println("Done fetchUsersVideosData")
+
+	err = getVideoData(httpClient, videoID, &videoResponse)
+	if err == nil {
+		userIndex.Video = videoResponse.Data
+	} else {
+		fmt.Printf(
+			"Get video failed for userID %s\n", userID)
+		return userIndex, err
+	}
+
+	indexUserVideoData(httpClient, userIndex)
+	return userIndex, nil
 }
 
-func indexUsersVideosData(httpClient *http.Client, userIndexes chan Index){
-	for userIndex := range userIndexes {
-		fmt.Printf("Posting userIndex %v to index service\n", userIndex)
-		err := postIndexData(httpClient, userIndex)
-		if err != nil {
-			fmt.Println("error indexing user data", err)
-		}
+func indexUserVideoData(httpClient *http.Client, userIndex Index){
+ 	// fmt.Printf("Posting userIndex %v to index service\n", userIndex)
+	err := postIndexData(httpClient, userIndex)
+	if err != nil {
+		fmt.Println("error indexing user data", err)
 	}
-
-	fmt.Println("Done indexUsersVideosData")
 }
 
 func postIndexData(httpClient *http.Client, userIndex Index) error {
@@ -146,6 +150,7 @@ func postIndexData(httpClient *http.Client, userIndex Index) error {
 		return err
 	}
 	defer response.Body.Close()
+	log.Printf("successfuly indexed userIndex %v\n", userIndex)
 	return nil
 }
 
@@ -155,59 +160,67 @@ func getUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 	fmt.Println("Requesting URL", userURL)
 	request, err := http.NewRequest("GET", userURL, nil)
 	if err != nil {
-		fmt.Printf("Error %s preparing request for URL %s", err, userURL)
+		fmt.Printf("Error %s preparing request for URL %s\n", err, userURL)
+		return err
 	}
+
 	// request.Header.Add("Accept-Encoding", "json")
 	response, err := httpClient.Do(request)
 	if err != nil {
-		fmt.Printf("Error %s requesting URL %s", err, userURL)
+		fmt.Printf("Error %s requesting URL %s\n", err, userURL)
+		return err
 	}
 
 	var reader io.ReadCloser
 	switch response.Header.Get("Content-Encoding") {
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
+		if err != nil {
+			return err
+		}
 		defer reader.Close()
 	default:
 		reader = response.Body
 	}
 
 	err = json.NewDecoder(reader).Decode(userResponse)
-	fmt.Printf("userResponse is %v\n", userResponse.Data)
 	if err != nil {
-		fmt.Printf("Error %s decoding %v\n", err, reader)
+		fmt.Printf("Error %s decoding %v for %s\n", err, reader, userURL)
+		return err
 	}
-	return err
+	return nil
 }
 
 func getVideoData(httpClient *http.Client, videoID string, videoResponse *VideoResponse) error {
 	videoURL := fmt.Sprintf("http://localhost:8001/videos/%s", videoID)
 
-	fmt.Println("Requesting URL", videoURL)
 	request, err := http.NewRequest("GET", videoURL, nil)
 	if err != nil {
-		fmt.Printf("Error %s preparing request for URL %s", err, videoURL)
+		return err
 	}
+
 	// request.Header.Add("Accept-Encoding", "json")
 	response, err := httpClient.Do(request)
 	if err != nil {
-		fmt.Printf("Error %s requesting URL %s", err, videoURL)
+		return err
 	}
 
-	// Check that the server actually sent compressed data
 	var reader io.ReadCloser
 	switch response.Header.Get("Content-Encoding") {
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
+		if err != nil {
+			return err
+		}
 		defer reader.Close()
 	default:
 		reader = response.Body
 	}
 
 	err = json.NewDecoder(reader).Decode(&videoResponse)
-	fmt.Printf("VideoResponse is %v\n", videoResponse.Data)
 	if err != nil {
-		fmt.Printf("Error %s decoding %v\n", err, reader)
+		fmt.Printf("Error %s decoding %v for %s\n", err, reader, videoURL)
+		return err
 	}
-	return err
+	return nil
 }

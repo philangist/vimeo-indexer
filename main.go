@@ -6,10 +6,8 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"fmt"
-	// "log"
 	"io"
 	"net/http"
-	// _ "net/http/pprof"
 	"os"
 	// "runtime/pprof"
 	"strings"
@@ -63,25 +61,15 @@ type Index struct {
 func main(){
 	start := time.Now()
 	httpClient := &http.Client{Timeout: time.Second * 10}
-	inputStream := make(chan [2]string, 1)
 	wg := &sync.WaitGroup{}
-
-	validateLine := func(line [2]string) (string, string, bool) {
-		if line == [2]string{}{
-			return "", "", false
-		}
-		return line[0], line[1], true
-	}
+	inputStream := make(chan [2]string, 1)
+	defer close(inputStream)
 
 	handler := func(wg *sync.WaitGroup){
 		for {
 			select{
 			case line := <- inputStream:
-				userID, videoID, valid := validateLine(line)
-				if !valid {
-					// fmt.Printf("Line: %v is invalid. Skipping...\n", line)
-					continue
-				}
+				userID, videoID := line[0], line[1]
 				_, err := fetchUserVideoData(userID, videoID, httpClient)
 				if err != nil {
 					wg.Add(1)
@@ -90,50 +78,47 @@ func main(){
 						wg.Done()
 					}()
 				}
-			case <- time.After(5 * time.Second):
+			case <- time.After(5 * time.Second): // TIMEOUT should be an ENV VAR
 				wg.Done()
 			}
 		}
 	}
 
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 1; i++ {  // NUM_THREADS should be an ENV VAR
 		wg.Add(1)
 		go handler(wg)
 	}
 	parseCSVStream(bufio.NewScanner(os.Stdin), inputStream)
-	func(){
-		wg.Wait()
-		defer close(inputStream)
-	}()
-
+	wg.Wait()
 	fmt.Println("Elapsed time was: ", time.Since(start))
-	fmt.Println("TOTAL_REQUESTS is: ", TOTAL_REQUESTS)
-	fmt.Println("len(STATUS_CODES) is: ", len(STATUS_CODES))
-	fmt.Println("STATUS_CODES is: ", STATUS_CODES)
 }
-
 
 func parseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
         for scanner.Scan(){
  		line := strings.Split(scanner.Text(), ",")
-
+		valid := validateCSVLine(line)
+		if !valid {
+			continue
+		}
 		inputStream <- [2]string{line[0], line[1]}
-		// fmt.Printf("Sending line %v to inputStream\n", line)
 	}
+}
+
+func validateCSVLine(line []string) bool {
+	if line == nil {
+		return false
+	}
+	return true
 }
 
 func fetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIndex Index, err error) {
 	var userResponse UserResponse
 	var videoResponse VideoResponse
 
-	// fmt.Printf("fetching userID: %s and videoID: %s\n", userID, videoID)
-
 	err = getUserData(httpClient, userID, &userResponse)
 	if err == nil {
 		userIndex.User = userResponse.Data
 	} else {
-		// fmt.Printf(
-		// 	"Get user failed for userID %s\n", userID)
 		return userIndex, err
 	}
 
@@ -141,8 +126,6 @@ func fetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIn
 	if err == nil {
 		userIndex.Video = videoResponse.Data
 	} else {
-		// fmt.Printf(
-		// 	"Get video failed for userID %s\n", userID)
 		return userIndex, err
 	}
 
@@ -168,32 +151,29 @@ func postIndexData(httpClient *http.Client, userIndex Index) error {
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusCreated {
+		// fmt.Printf(
+		//	"Index service returned unexpected status code %d for userID %d and videoID %d\n",
+		//	response.StatusCode, userIndex.User.ID, userIndex.Video.ID)
 		return fmt.Errorf(
-			"Index service returned unexpected status code %d ", response.StatusCode)
+			"Index service returned unexpected status code %d", response.StatusCode)
 	}
 
-	response.Body.Close()
-
-	TOTAL_REQUESTS += 1
-	STATUS_CODES = append(STATUS_CODES, response.StatusCode)
 	return nil
 }
 
 func getUserData(httpClient *http.Client, userID string, userResponse *UserResponse) error {
 	userURL := fmt.Sprintf("http://localhost:8000/users/%s", userID)
 
-	// fmt.Println("Requesting URL", userURL)
 	request, err := http.NewRequest("GET", userURL, nil)
 	if err != nil {
-		// fmt.Printf("Error %s preparing request for URL %s\n", err, userURL)
 		return err
 	}
 
-	// request.Header.Add("Accept-Encoding", "json")
 	response, err := httpClient.Do(request)
 	if err != nil {
-		// fmt.Printf("Error %s requesting URL %s\n", err, userURL)
 		return err
 	}
 
@@ -211,7 +191,6 @@ func getUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 
 	err = json.NewDecoder(reader).Decode(userResponse)
 	if err != nil {
-		// fmt.Printf("Error %s decoding %v for %s\n", err, reader, userURL)
 		return err
 	}
 	return nil
@@ -245,7 +224,6 @@ func getVideoData(httpClient *http.Client, videoID string, videoResponse *VideoR
 
 	err = json.NewDecoder(reader).Decode(&videoResponse)
 	if err != nil {
-		// fmt.Printf("Error %s decoding %v for %s\n", err, reader, videoURL)
 		return err
 	}
 	return nil

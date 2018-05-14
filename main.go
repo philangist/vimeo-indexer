@@ -19,6 +19,9 @@ import (
 const (
 	MEMPROF = "perf/memprof-%s"
 	CPUPROF = "perf/cpuprof-%s"
+	USERS_URL = "http://localhost:8000/users/"
+	VIDEOS_URL = "http://localhost:8001/videos/"
+	INDEX_URL = "http://localhost:8002/index"
 )
 
 var (
@@ -134,29 +137,25 @@ func ValidateCSVLine(line []string) bool {
 }
 
 func FetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIndex Index, err error) {
-	var userResponse UserResponse
-	var videoResponse VideoResponse
-
-	err = GetUserData(httpClient, userID, &userResponse)
+	userResponse, err := GetUserData(httpClient, USERS_URL, userID)
 	if err == nil {
 		userIndex.User = userResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	err = GetVideoData(httpClient, videoID, &videoResponse)
+	videoResponse, err := GetVideoData(httpClient, VIDEOS_URL, videoID)
 	if err == nil {
 		userIndex.Video = videoResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	err = PostIndexData(httpClient, userIndex)
+	err = PostIndexData(httpClient, INDEX_URL, userIndex)
 	return userIndex, err
 }
 
-func PostIndexData(httpClient *http.Client, userIndex Index) error {
-	indexURL := "http://localhost:8002/index"
+func PostIndexData(httpClient *http.Client, indexURL string, userIndex Index) error {
 
 	serializedUserIndex, err := json.Marshal(userIndex)
 	if err != nil {
@@ -176,9 +175,6 @@ func PostIndexData(httpClient *http.Client, userIndex Index) error {
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusCreated {
-		// fmt.Printf(
-		//	"Index service returned unexpected status code %d for userID %d and videoID %d\n",
-		//	response.StatusCode, userIndex.User.ID, userIndex.Video.ID)
 		return fmt.Errorf(
 			"Index service returned unexpected status code %d", response.StatusCode)
 	}
@@ -186,20 +182,23 @@ func PostIndexData(httpClient *http.Client, userIndex Index) error {
 	return nil
 }
 
-func GetUserData(httpClient *http.Client, userID string, userResponse *UserResponse) error {
-	userURL := fmt.Sprintf("http://localhost:8000/users/%s", userID)
+func GetUserData(httpClient *http.Client, usersUrl, userID string) (*UserResponse, error) {
+	userResponse := &UserResponse{}
+	usersURL := fmt.Sprintf("%s%s", usersUrl, userID)
 
-	request, err := http.NewRequest("GET", userURL, nil)
+	fmt.Println("usersURL is ", usersURL)
+
+	request, err := http.NewRequest("GET", usersURL, nil)
 	if err != nil {
-		return err
+		return userResponse, err
 	}
 
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return err
+		return userResponse, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf(
+		return userResponse, fmt.Errorf(
 			"Users service returned unexpected status code %d", response.StatusCode)
 	}
 
@@ -208,7 +207,7 @@ func GetUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
-			return err
+			return userResponse, err
 		}
 		defer reader.Close()
 	default:
@@ -217,26 +216,29 @@ func GetUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 
 	err = json.NewDecoder(reader).Decode(userResponse)
 	if err != nil {
-		return err
+		return userResponse, err
 	}
-	return nil
+	return userResponse, nil
 }
 
-func GetVideoData(httpClient *http.Client, videoID string, videoResponse *VideoResponse) error {
-	videoURL := fmt.Sprintf("http://localhost:8001/videos/%s", videoID)
+func GetVideoData(httpClient *http.Client, videosUrl, videoID string) (*VideoResponse, error) {
+	// these urls are attributes on a container struct
+	// GET, POST, ETC, are methods on it
+	videoResponse := &VideoResponse{}
+	videosURL := fmt.Sprintf("%s%s", videosUrl, videoID)
 
-	request, err := http.NewRequest("GET", videoURL, nil)
+	request, err := http.NewRequest("GET", videosURL, nil)
 	if err != nil {
-		return err
+		return videoResponse, err
 	}
 
 	// request.Header.Add("Accept-Encoding", "json")
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return err
+		return videoResponse, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf(
+		return videoResponse, fmt.Errorf(
 			"Videos service returned unexpected status code %d", response.StatusCode)
 	}
 
@@ -245,16 +247,16 @@ func GetVideoData(httpClient *http.Client, videoID string, videoResponse *VideoR
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
-			return err
+			return videoResponse, err
 		}
 		defer reader.Close()
 	default:
 		reader = response.Body
 	}
 
-	err = json.NewDecoder(reader).Decode(&videoResponse)
+	err = json.NewDecoder(reader).Decode(videoResponse)
 	if err != nil {
-		return err
+		return videoResponse, err
 	}
-	return nil
+	return videoResponse, nil
 }

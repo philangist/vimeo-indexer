@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	// "runtime/pprof"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -70,7 +71,7 @@ func main(){
 			select{
 			case line := <- inputStream:
 				userID, videoID := line[0], line[1]
-				_, err := fetchUserVideoData(userID, videoID, httpClient)
+				_, err := FetchUserVideoData(userID, videoID, httpClient)
 				if err != nil {
 					wg.Add(1)
 					go func(){
@@ -78,7 +79,7 @@ func main(){
 						wg.Done()
 					}()
 				}
-			case <- time.After(5 * time.Second): // TIMEOUT should be an ENV VAR
+			case <- time.After(1 * time.Second): // TIMEOUT should be an ENV VAR
 				wg.Done()
 			}
 		}
@@ -88,15 +89,15 @@ func main(){
 		wg.Add(1)
 		go handler(wg)
 	}
-	parseCSVStream(bufio.NewScanner(os.Stdin), inputStream)
+	ParseCSVStream(bufio.NewScanner(os.Stdin), inputStream)
 	wg.Wait()
 	fmt.Println("Elapsed time was: ", time.Since(start))
 }
 
-func parseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
+func ParseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
         for scanner.Scan(){
  		line := strings.Split(scanner.Text(), ",")
-		valid := validateCSVLine(line)
+		valid := ValidateCSVLine(line)
 		if !valid {
 			continue
 		}
@@ -104,36 +105,57 @@ func parseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
 	}
 }
 
-func validateCSVLine(line []string) bool {
+func ValidateCSVLine(line []string) bool {
 	if line == nil {
 		return false
 	}
+	if len(line) != 2 {
+		return false
+	}
+
+	userID := strings.TrimSpace(line[0])
+	videoID := strings.TrimSpace(line[1])
+
+	if (len(userID) == 0 || len(videoID) == 0) {
+		return false
+	}
+
+	_, err := strconv.ParseInt(userID, 10, 32)
+	if err != nil {
+		return false
+	}
+
+	_, err = strconv.ParseInt(videoID, 10, 32)
+	if err != nil {
+		return false
+	}
+
 	return true
 }
 
-func fetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIndex Index, err error) {
+func FetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIndex Index, err error) {
 	var userResponse UserResponse
 	var videoResponse VideoResponse
 
-	err = getUserData(httpClient, userID, &userResponse)
+	err = GetUserData(httpClient, userID, &userResponse)
 	if err == nil {
 		userIndex.User = userResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	err = getVideoData(httpClient, videoID, &videoResponse)
+	err = GetVideoData(httpClient, videoID, &videoResponse)
 	if err == nil {
 		userIndex.Video = videoResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	err = postIndexData(httpClient, userIndex)
+	err = PostIndexData(httpClient, userIndex)
 	return userIndex, err
 }
 
-func postIndexData(httpClient *http.Client, userIndex Index) error {
+func PostIndexData(httpClient *http.Client, userIndex Index) error {
 	indexURL := "http://localhost:8002/index"
 
 	serializedUserIndex, err := json.Marshal(userIndex)
@@ -164,7 +186,7 @@ func postIndexData(httpClient *http.Client, userIndex Index) error {
 	return nil
 }
 
-func getUserData(httpClient *http.Client, userID string, userResponse *UserResponse) error {
+func GetUserData(httpClient *http.Client, userID string, userResponse *UserResponse) error {
 	userURL := fmt.Sprintf("http://localhost:8000/users/%s", userID)
 
 	request, err := http.NewRequest("GET", userURL, nil)
@@ -175,6 +197,10 @@ func getUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 	response, err := httpClient.Do(request)
 	if err != nil {
 		return err
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf(
+			"Users service returned unexpected status code %d", response.StatusCode)
 	}
 
 	var reader io.ReadCloser
@@ -196,7 +222,7 @@ func getUserData(httpClient *http.Client, userID string, userResponse *UserRespo
 	return nil
 }
 
-func getVideoData(httpClient *http.Client, videoID string, videoResponse *VideoResponse) error {
+func GetVideoData(httpClient *http.Client, videoID string, videoResponse *VideoResponse) error {
 	videoURL := fmt.Sprintf("http://localhost:8001/videos/%s", videoID)
 
 	request, err := http.NewRequest("GET", videoURL, nil)
@@ -208,6 +234,10 @@ func getVideoData(httpClient *http.Client, videoID string, videoResponse *VideoR
 	response, err := httpClient.Do(request)
 	if err != nil {
 		return err
+	}
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf(
+			"Videos service returned unexpected status code %d", response.StatusCode)
 	}
 
 	var reader io.ReadCloser

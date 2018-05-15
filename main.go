@@ -17,25 +17,25 @@ import (
 )
 
 const (
-	MEMPROF = "perf/memprof-%s"
-	CPUPROF = "perf/cpuprof-%s"
-	USERS_URL = "http://localhost:8000/users"
+	MEMPROF    = "perf/memprof-%s"
+	CPUPROF    = "perf/cpuprof-%s"
+	USERS_URL  = "http://localhost:8000/users"
 	VIDEOS_URL = "http://localhost:8001/videos"
-	INDEX_URL = "http://localhost:8002/index"
+	INDEX_URL  = "http://localhost:8002/index"
 )
 
 var (
 	TOTAL_REQUESTS = 0
-	STATUS_CODES = []int{}
+	STATUS_CODES   = []int{}
 )
 
 type User struct {
-	ID int `json:"id"`
+	ID       int    `json:"id"`
 	FullName string `json:"fullName"`
-	Email string `json:"email"`
-	Country string `json:"country"`
+	Email    string `json:"email"`
+	Country  string `json:"country"`
 	Language string `json:"language"`
-	LastIP string `json:"lastIp"`
+	LastIP   string `json:"lastIp"`
 }
 
 type UserResponse struct {
@@ -43,13 +43,13 @@ type UserResponse struct {
 }
 
 type Video struct {
-	ID int `json:"id"`
-	Title string `json:"title"`
-	Caption string `json:"caption"`
-	Privacy string `json:"privacy"`
-	FrameRate string `json:"frameRate"`
-	VideoCodec string `json:"videoCodec"`
-	AudioCodec string `json:"audioCodec"`
+	ID              int    `json:"id"`
+	Title           string `json:"title"`
+	Caption         string `json:"caption"`
+	Privacy         string `json:"privacy"`
+	FrameRate       string `json:"frameRate"`
+	VideoCodec      string `json:"videoCodec"`
+	AudioCodec      string `json:"audioCodec"`
 	AudioSampleRate string `json:"audioSampleRate"`
 }
 
@@ -58,37 +58,37 @@ type VideoResponse struct {
 }
 
 type Index struct {
-	User User `json:"user"`
+	User  User  `json:"user"`
 	Video Video `json:"video"`
 }
 
-func main(){
+func main() {
 	start := time.Now()
 	httpClient := &http.Client{Timeout: time.Second * 10}
 	wg := &sync.WaitGroup{}
 	inputStream := make(chan [2]string, 1)
 	defer close(inputStream)
 
-	handler := func(wg *sync.WaitGroup){
+	handler := func(wg *sync.WaitGroup) {
 		for {
-			select{
-			case line := <- inputStream:
+			select {
+			case line := <-inputStream:
 				userID, videoID := line[0], line[1]
 				_, err := FetchUserVideoData(userID, videoID, httpClient)
 				if err != nil {
 					wg.Add(1)
-					go func(){
+					go func() {
 						inputStream <- line
 						wg.Done()
 					}()
 				}
-			case <- time.After(1 * time.Second): // TIMEOUT should be an ENV VAR
+			case <-time.After(1 * time.Second): // TIMEOUT should be an ENV VAR
 				wg.Done()
 			}
 		}
 	}
 
-	for i := 0; i < 1; i++ {  // NUM_THREADS should be an ENV VAR
+	for i := 0; i < 1; i++ { // NUM_THREADS should be an ENV VAR
 		wg.Add(1)
 		go handler(wg)
 	}
@@ -98,8 +98,8 @@ func main(){
 }
 
 func ParseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
-        for scanner.Scan(){
- 		line := strings.Split(scanner.Text(), ",")
+	for scanner.Scan() {
+		line := strings.Split(scanner.Text(), ",")
 		valid := ValidateCSVLine(line)
 		if !valid {
 			continue
@@ -119,7 +119,7 @@ func ValidateCSVLine(line []string) bool {
 	userID := strings.TrimSpace(line[0])
 	videoID := strings.TrimSpace(line[1])
 
-	if (len(userID) == 0 || len(videoID) == 0) {
+	if len(userID) == 0 || len(videoID) == 0 {
 		return false
 	}
 

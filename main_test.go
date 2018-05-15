@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"time"
 	"testing"
+	"time"
 )
 
 // return a handler that writes a json serialized version of entity
@@ -22,8 +22,8 @@ func jsonHandler(entity interface{}) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-const(
-	HTTP_CREATED = http.StatusCreated
+const (
+	HTTP_CREATED     = http.StatusCreated
 	HTTP_UNAVAILABLE = http.StatusServiceUnavailable
 )
 
@@ -34,36 +34,36 @@ func statusHandler(status int) func(http.ResponseWriter, *http.Request) {
 }
 
 type csvTestCase struct {
-	Tag string
-	Input []string
+	Tag      string
+	Input    []string
 	Expected bool
 }
 
-func TestValidateCSVLine(t *testing.T){
+func TestValidateCSVLine(t *testing.T) {
 	fmt.Println("Running TestValidateCSVLine...")
 	cases := []csvTestCase{
 		{
-			Tag: "case 1 - valid ids",
-			Input: []string{"111111","111111"},
+			Tag:      "case 1 - valid ids",
+			Input:    []string{"111111", "111111"},
 			Expected: true,
 		},
 		{
-			Tag: "case 2 - missing video id",
-			Input: []string{"99999",""},
+			Tag:      "case 2 - missing video id",
+			Input:    []string{"99999", ""},
 			Expected: false,
 		},
 		{
-			Tag: "case 3 - empty strings",
-			Input: []string{"  ","  "},
+			Tag:      "case 3 - empty strings",
+			Input:    []string{"  ", "  "},
 			Expected: false,
 		},
 		{
-			Tag: "case 4 - non integer ids",
-			Input: []string{"foo","bar"},
+			Tag:      "case 4 - non integer ids",
+			Input:    []string{"foo", "bar"},
 			Expected: false,
 		},
 	}
-	
+
 	for _, c := range cases {
 		fmt.Println(c.Tag)
 		actual := ValidateCSVLine(c.Input)
@@ -74,24 +74,24 @@ func TestValidateCSVLine(t *testing.T){
 }
 
 type getUserTestCase struct {
-	Tag string
-	ID  string
+	Tag      string
+	ID       string
 	Expected *UserResponse
 }
 
-func TestGetUsers(t *testing.T){
+func TestGetUsers(t *testing.T) {
 	fmt.Println("Running TestGetUsers...")
 	c := getUserTestCase{
 		Tag: "Case 1 - Basic deserialization",
 		ID:  "1000",
 		Expected: &UserResponse{
 			Data: User{
-				ID: 1,
+				ID:       1,
 				FullName: "John Smith",
-				Email: "john.smith@gmail.com",
-				Country: "Antigua",
+				Email:    "john.smith@gmail.com",
+				Country:  "Antigua",
 				Language: "Dutch",
-				LastIP: "10.10.10.10",
+				LastIP:   "10.10.10.10",
 			},
 		},
 	}
@@ -110,7 +110,7 @@ func TestGetUsers(t *testing.T){
 	}
 }
 
-func TestGetUsersServerDown(t *testing.T){
+func TestGetUsersServerDown(t *testing.T) {
 	fmt.Println("Running TestGetUsersServerDown...")
 	handler := statusHandler(HTTP_UNAVAILABLE)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
@@ -125,25 +125,25 @@ func TestGetUsersServerDown(t *testing.T){
 }
 
 type getVideoTestCase struct {
-	Tag string
-	ID  string
+	Tag      string
+	ID       string
 	Expected *VideoResponse
 }
 
-func TestGetVideos(t *testing.T){
+func TestGetVideos(t *testing.T) {
 	fmt.Println("Running TestGetVideos...")
 	c := getVideoTestCase{
 		Tag: "Case 1 - Basic deserialization",
 		ID:  "1000",
 		Expected: &VideoResponse{
 			Data: Video{
-				ID: 1,
-				Title: "Joe Rogan Experience #1114 - Matt Taibbi",
-				Caption: "Matt Taibbi is a journalist and author...",
-				Privacy: "public",
-				FrameRate: "60",
-				VideoCodec: "H.264",
-				AudioCodec: "AAC",
+				ID:              1,
+				Title:           "Joe Rogan Experience #1114 - Matt Taibbi",
+				Caption:         "Matt Taibbi is a journalist and author...",
+				Privacy:         "public",
+				FrameRate:       "60",
+				VideoCodec:      "H.264",
+				AudioCodec:      "AAC",
 				AudioSampleRate: "128",
 			},
 		},
@@ -154,7 +154,7 @@ func TestGetVideos(t *testing.T){
 	handler := jsonHandler(c.Expected)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 
-	defer tServer.Close()		
+	defer tServer.Close()
 
 	actual, _ := GetVideoData(httpClient, tServer.URL, c.ID)
 	if !reflect.DeepEqual(actual, c.Expected) {
@@ -164,7 +164,7 @@ func TestGetVideos(t *testing.T){
 	}
 }
 
-func TestGetVideosServerDown(t *testing.T){
+func TestGetVideosServerDown(t *testing.T) {
 	fmt.Println("Running TestGetVideosServerDown...")
 	handler := statusHandler(HTTP_UNAVAILABLE)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
@@ -177,7 +177,7 @@ func TestGetVideosServerDown(t *testing.T){
 	}
 }
 
-func TestPostIndex(t *testing.T){
+func TestPostIndex(t *testing.T) {
 	fmt.Println("Running TestPostIndexData...")
 
 	handler := statusHandler(HTTP_CREATED)
@@ -191,7 +191,7 @@ func TestPostIndex(t *testing.T){
 	}
 }
 
-func TestPostIndexServerDown(t *testing.T){
+func TestPostIndexServerDown(t *testing.T) {
 	fmt.Println("Running TestPostIndexServerDown...")
 
 	handler := statusHandler(HTTP_UNAVAILABLE)

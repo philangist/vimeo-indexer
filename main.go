@@ -19,8 +19,7 @@ import (
 )
 
 const (
-	MEMPROF    = "perf/memprof-%s"
-	CPUPROF    = "perf/cpuprof-%s"
+	CPUPROF    = "perf/cpuprof-%s"  // add CPUPROF flag
 	USERS_URL  = "http://localhost:8000/users"
 	VIDEOS_URL = "http://localhost:8001/videos"
 	INDEX_URL  = "http://localhost:8002/index"
@@ -54,12 +53,13 @@ type VideoResponse struct {
 	Data Video `json:"data"`
 }
 
+// IndexRequest??
 type Index struct {
 	User  User  `json:"user"`
 	Video Video `json:"video"`
 }
 
-type Config struct { // cfg fields should be CAPITAL
+type Config struct {
 	UsersURL string
 	VideosURL string
 	IndexURL string
@@ -104,20 +104,31 @@ func ReadConfigFromEnv() *Config {
 	}
 }
 
-func main(){
-	start := time.Now()
+type IndexService struct {
+	*Config
+	Input       chan [2]string
+	Timeout     chan bool
+	Client      *http.Client
+}
+
+func NewIndexService(cfg *Config, client *http.Client) *IndexService {
+	input := make(chan [2]string, 1)
+	timeout := make(chan bool, 1)
+
+	return &IndexService{
+		cfg,
+		input,
+		timeout,
+		client,
+	}
+}
+
+func (service *IndexService) Execute(reader io.Reader) {
 	wg := &sync.WaitGroup{}
-
-	service := NewIndexService(
-		ReadConfigFromEnv(),
-		&http.Client{Timeout: time.Second * 10},
-	)
-	defer service.Cleanup()
-
-	handler := func(wg *sync.WaitGroup) { // rename handler
+	multiplexer := func(wg *sync.WaitGroup) {
 		for line := range service.Input {
 			userID, videoID := line[0], line[1]
-			_, err := service.IndexUserVideo(userID, videoID)
+			err := service.IndexUserVideo(userID, videoID)
 			if err == nil {
 				service.Timeout <- true
 				continue
@@ -144,33 +155,12 @@ func main(){
 
 	wg.Add(1)
 	go timeout(wg)
-
-	for i := 0; i < service.Threads; i++ { // NUM_THREADS should be an ENV VAR
-		go handler(wg)
+	for i := 0; i < service.Threads; i++ {
+		go multiplexer(wg)
 	}
 
-	service.ParseCSVStream(bufio.NewScanner(os.Stdin))
+	service.ParseCSVStream(bufio.NewScanner(reader))
 	wg.Wait()
-	fmt.Println("Elapsed time was: ", time.Since(start))
-}
-
-type IndexService struct {
-	*Config
-	Input       chan [2]string
-	Timeout     chan bool
-	Client      *http.Client
-}
-
-func NewIndexService(cfg *Config, client *http.Client) *IndexService {
-	input := make(chan [2]string, 1)
-	timeout := make(chan bool, 1)
-
-	return &IndexService{
-		cfg,
-		input,
-		timeout,
-		client,
-	}
 }
 
 func (service *IndexService) ParseCSVStream(scanner *bufio.Scanner) {
@@ -212,34 +202,33 @@ func ValidateCSVLine(line []string) bool {
 	return true
 }
 
-func (service *IndexService) IndexUserVideo(userID, videoID string) (userIndex Index, err error) {
+func (service *IndexService) IndexUserVideo(userID, videoID string) error {
+	var index Index
+
 	userResponse, err := service.GetUser(userID)
-	if err == nil {
-		userIndex.User = userResponse.Data
-	} else {
-		return userIndex, err
-	}
-
-	videoResponse, err := service.GetVideo(videoID)
-	if err == nil {
-		userIndex.Video = videoResponse.Data
-	} else {
-		return userIndex, err
-	}
-
-	err = service.PostIndex(userIndex)
-	return userIndex, err
-}
-
-func (service *IndexService) PostIndex (userIndex Index) error {
-
-	// should probably pass in pointer for userIndex
-	serializedUserIndex, err := json.Marshal(userIndex)
 	if err != nil {
 		return err
 	}
 
-	request, err := http.NewRequest("POST", service.IndexURL, bytes.NewBuffer(serializedUserIndex))
+	videoResponse, err := service.GetVideo(videoID)
+	if err != nil {
+		return err
+	}
+
+	index.User = userResponse.Data
+	index.Video = videoResponse.Data
+
+	err = service.PostIndex(index)
+	return err
+}
+
+func (service *IndexService) PostIndex (index Index) error {
+	serializedIndex, err := json.Marshal(index)
+	if err != nil {
+		return err
+	}
+
+	request, err := http.NewRequest("POST", service.IndexURL, bytes.NewBuffer(serializedIndex))  // why did i use bytes.newbuffer here?
 	if err != nil {
 		return err
 	}
@@ -259,34 +248,33 @@ func (service *IndexService) PostIndex (userIndex Index) error {
 	return nil
 }
 
-func  (service *IndexService) GetUser(userID string) (*UserResponse, error){
+func  (service *IndexService) GetUser(ID string) (*UserResponse, error){
 	userResponse := &UserResponse{}
-	usersURL := fmt.Sprintf("%s/%s", service.UsersURL, userID)
+	usersURL := fmt.Sprintf("%s/%s", service.UsersURL, ID)
 
-	bytes, err := service.RequestEntity(usersURL)
+	b, err := service.JSONRequest(usersURL)
 	if err != nil {
 		return userResponse, err
 	}
 
-	json.Unmarshal(bytes, userResponse)
+	json.Unmarshal(b, userResponse)
 	return userResponse, nil
 }
 
-func (service *IndexService) GetVideo(videoID string) (*VideoResponse, error){
+func (service *IndexService) GetVideo(ID string) (*VideoResponse, error){
 	videoResponse := &VideoResponse{}
-	videosURL := fmt.Sprintf("%s/%s", service.VideosURL, videoID)
+	videosURL := fmt.Sprintf("%s/%s", service.VideosURL, ID)
 
-	bytes, err := service.RequestEntity(videosURL)
+	b, err := service.JSONRequest(videosURL)
 	if err != nil {
 		return videoResponse, err
 	}
 
-	json.Unmarshal(bytes, videoResponse)
+	json.Unmarshal(b, videoResponse)
 	return videoResponse, nil
 }
 
-// maybe retrieve entity? fetch entity?
-func(service *IndexService) RequestEntity(URL string) ([]byte, error){
+func(service *IndexService) JSONRequest(URL string) ([]byte, error){
 	var entity []byte
 
 	request, err := http.NewRequest("GET", URL, nil)
@@ -318,7 +306,18 @@ func(service *IndexService) RequestEntity(URL string) ([]byte, error){
 	return ioutil.ReadAll(reader)
 }
 
-func(service *IndexService) Cleanup (){
+func(service *IndexService) Close (){
 	close(service.Input)
 	close(service.Timeout)
+}
+
+func main(){
+	start := time.Now()
+	service := NewIndexService(
+		ReadConfigFromEnv(),
+		&http.Client{Timeout: time.Second * 10},
+	)
+	defer service.Close()
+	service.Execute(os.Stdin)
+	fmt.Println("Elapsed time was: ", time.Since(start))
 }

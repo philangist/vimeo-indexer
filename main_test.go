@@ -37,6 +37,10 @@ func createTestConfig(url string) *Config {
 	return &Config{url, url, url, time.Duration(1), 1}
 }
 
+/*
+-- input tests
+*/
+
 type csvTestCase struct {
 	Tag      string
 	Input    []string
@@ -76,6 +80,12 @@ func TestValidateCSVLine(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCSVStream(t *testing.T) {}
+
+/*
+-- networking tests
+*/
 
 type getUserTestCase struct {
 	Tag      string
@@ -231,3 +241,11 @@ func TestPostIndexServerDown(t *testing.T) {
 /*
 func TestIndexUserVideoData(){}
 */
+
+/*
+-- concurrency tests
+*/
+
+func TestIndexServiceExecute(t *testing.T) {}
+
+func TestCloseChannels(t *testing.T) {}

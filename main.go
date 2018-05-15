@@ -184,9 +184,7 @@ func PostIndexData(httpClient *http.Client, indexURL string, userIndex Index) er
 
 func GetUserData(httpClient *http.Client, usersUrl, userID string) (*UserResponse, error) {
 	userResponse := &UserResponse{}
-	usersURL := fmt.Sprintf("%s%s", usersUrl, userID)
-
-	fmt.Println("usersURL is ", usersURL)
+	usersURL := fmt.Sprintf("%s/%s", usersUrl, userID)
 
 	request, err := http.NewRequest("GET", usersURL, nil)
 	if err != nil {
@@ -225,7 +223,7 @@ func GetVideoData(httpClient *http.Client, videosUrl, videoID string) (*VideoRes
 	// these urls are attributes on a container struct
 	// GET, POST, ETC, are methods on it
 	videoResponse := &VideoResponse{}
-	videosURL := fmt.Sprintf("%s%s", videosUrl, videoID)
+	videosURL := fmt.Sprintf("%s/%s", videosUrl, videoID)
 
 	request, err := http.NewRequest("GET", videosURL, nil)
 	if err != nil {

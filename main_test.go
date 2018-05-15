@@ -3,12 +3,31 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"time"
 	"testing"
 )
+
+// return a handler that writes a json serialized version of entity
+func jsonHandler(entity interface{}) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		serialized, err := json.Marshal(entity)
+		if err != nil {
+			log.Panic(err)
+		}
+		w.Write(serialized)
+	}
+}
+
+// return a handler that mimics an internal server error
+func status503Handler() func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+}
 
 type csvTestCase struct {
 	Tag string
@@ -59,55 +78,44 @@ type getUserTestCase struct {
 
 func TestGetUsers(t *testing.T){
 	fmt.Println("Running TestGetUsers...")
-	cases := []getUserTestCase{
-		{
-			Tag: "Case 1 - Basic deserialization",
-			ID:  "1000",
-			Expected: &UserResponse{
-				Data: User{
-					ID: 1,
-					FullName: "John Smith",
-					Email: "john.smith@gmail.com",
-					Country: "Antigua",
-					Language: "Dutch",
-					LastIP: "10.10.10.10",
-				},
+	c := getUserTestCase{
+		Tag: "Case 1 - Basic deserialization",
+		ID:  "1000",
+		Expected: &UserResponse{
+			Data: User{
+				ID: 1,
+				FullName: "John Smith",
+				Email: "john.smith@gmail.com",
+				Country: "Antigua",
+				Language: "Dutch",
+				LastIP: "10.10.10.10",
 			},
 		},
 	}
 
 	httpClient := &http.Client{Timeout: time.Second * 10}
 
-	for _, c := range cases {
-		tServer := httptest.NewServer(
-			http.HandlerFunc(
-				func(w http.ResponseWriter, r *http.Request) {
-					serialized, _ := json.Marshal(c.Expected)
-					w.Write(serialized)
-				}))
+	handler := jsonHandler(c.Expected)
+	tServer := httptest.NewServer(http.HandlerFunc(handler))
+	defer tServer.Close()
 
-		actual, _ := GetUserData(httpClient, tServer.URL, c.ID)
-		if !reflect.DeepEqual(actual, c.Expected) {
-			t.Errorf(
-				"Unmarshalled value '%v' did not match expected value '%v'\n",
-				actual, c.Expected)
-		}
-
-		tServer.Close()		
+	actual, _ := GetUserData(httpClient, tServer.URL, c.ID)
+	if !reflect.DeepEqual(actual, c.Expected) {
+		t.Errorf(
+			"Unmarshalled value '%v' did not match expected value '%v'\n",
+			actual, c.Expected)
 	}
 }
 
 func TestGetUsersServerDown(t *testing.T){
 	fmt.Println("Running TestGetUsersServerDown...")
-	tServer := httptest.NewServer(
-		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			}))
+	handler := status503Handler()
+	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
 	httpClient := &http.Client{Timeout: time.Second * 10}
 	_, err := GetUserData(httpClient, tServer.URL, "1000")
+
 	if err == nil {
 		t.Errorf("Expected GetUserData to err on 503, receieved nil")
 	}
@@ -119,60 +127,48 @@ type getVideoTestCase struct {
 	Expected *VideoResponse
 }
 
-func TestGetVideos(t *testing.T){
-	fmt.Println("Running TestGetVideos...")
-	cases := []getVideoTestCase{
-		{
-			Tag: "Case 1 - Basic deserialization",
-			ID:  "1000",
-			Expected: &VideoResponse{
-				Data: Video{
-					ID: 1,
-					Title: "Joe Rogan Experience #1114 - Matt Taibbi",
-					Caption: "Matt Taibbi is a journalist and author...",
-					Privacy: "public",
-					FrameRate: "60",
-					VideoCodec: "H.264",
-					AudioCodec: "AAC",
-					AudioSampleRate: "128",
-				},
+func TestGetVideosUp(t *testing.T){
+	fmt.Println("Running TestGetVideosUp...")
+	c := getVideoTestCase{
+		Tag: "Case 1 - Basic deserialization",
+		ID:  "1000",
+		Expected: &VideoResponse{
+			Data: Video{
+				ID: 1,
+				Title: "Joe Rogan Experience #1114 - Matt Taibbi",
+				Caption: "Matt Taibbi is a journalist and author...",
+				Privacy: "public",
+				FrameRate: "60",
+				VideoCodec: "H.264",
+				AudioCodec: "AAC",
+				AudioSampleRate: "128",
 			},
 		},
 	}
 
 	httpClient := &http.Client{Timeout: time.Second * 10}
 
-	for _, c := range cases {
-		tServer := httptest.NewServer(
-			http.HandlerFunc(
-				func(w http.ResponseWriter, r *http.Request) {
-					serialized, _ := json.Marshal(c.Expected)
-					w.Write(serialized)
-				}))
+	handler := jsonHandler(c.Expected)
+	tServer := httptest.NewServer(http.HandlerFunc(handler))
 
-		actual, _ := GetVideoData(httpClient, tServer.URL, c.ID)
-		if !reflect.DeepEqual(actual, c.Expected) {
-			t.Errorf(
-				"Unmarshalled value '%v' did not match expected value '%v'\n",
-				actual, c.Expected)
-		}
+	defer tServer.Close()		
 
-		tServer.Close()		
+	actual, _ := GetVideoData(httpClient, tServer.URL, c.ID)
+	if !reflect.DeepEqual(actual, c.Expected) {
+		t.Errorf(
+			"Unmarshalled value '%v' did not match expected value '%v'\n",
+			actual, c.Expected)
 	}
 }
 
 func TestGetVideosServerDown(t *testing.T){
 	fmt.Println("Running TestGetVideosServerDown...")
-	tServer := httptest.NewServer(
-		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			}))
+	handler := status503Handler()
+	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
 	httpClient := &http.Client{Timeout: time.Second * 10}
 	_, err := GetVideoData(httpClient, tServer.URL, "1000")
-	fmt.Println("err is ", err)
 	if err == nil {
 		t.Errorf("Expected GetUserData to err on 503, receieved nil")
 	}
@@ -187,18 +183,16 @@ func TestPostIndexData(t *testing.T){
 
 func TestPostIndexServerDown(t *testing.T){
 	fmt.Println("Running TestPostIndexServerDown...")
-	tServer := httptest.NewServer(
-		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			}))
+
+	handler := status503Handler()
+	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
 	httpClient := &http.Client{Timeout: time.Second * 10}
 	err := PostIndexData(httpClient, tServer.URL, Index{})
-	fmt.Println("err is ", err)
+
 	if err == nil {
-		t.Errorf("Expected TestPosttVideoDataServerDown to err on 503, receieved nil")
+		t.Errorf("Expected TestPostIndexServerDown to err on 503, receieved nil")
 	}
 }
 

@@ -94,37 +94,36 @@ func ReadConfigFromEnv() *Config {
 		log.Panic("Invalid value set for NUM_THREADS")
 	}
 
-	return &Config{usersURL, videosURL, indexURL, time.Duration(timeout), int(threads)}
+	return &Config{
+		usersURL,
+		videosURL,
+		indexURL,
+		time.Duration(timeout) * time.Second,
+		int(threads),
+	}
 }
-
-// options
-// timeout, num_threads, users_url, videos_url, index_url
-
-// IndexService(cfg)
 
 func main(){
 	start := time.Now()
-	cfg := ReadConfigFromEnv()
-	httpClient := &http.Client{Timeout: time.Second * 10}
 	wg := &sync.WaitGroup{}
 
-	input := make(chan [2]string, 1)
-	success := make(chan bool, 1)
-
-	defer close(input)
-	defer close(success)
+	service := NewService(
+		ReadConfigFromEnv(),
+		&http.Client{Timeout: time.Second * 10},
+	)
+	defer service.Cleanup()
 
 	handler := func(wg *sync.WaitGroup) { // rename handler
-		for line := range input {
+		for line := range service.Input {
 			userID, videoID := line[0], line[1]
-			_, err := FetchUserVideoData(userID, videoID, httpClient)
+			_, err := service.FetchUserVideoData(userID, videoID)
 			if err == nil {
-				success <- true
+				service.Timeout <- true
 				continue
 			} else {
 				wg.Add(1)
 				go func() {
-					input <- line
+					service.Input <- line
 					wg.Done()
 				}()
 			}
@@ -134,9 +133,9 @@ func main(){
 	timeout := func(wg *sync.WaitGroup) {
 		for {
 			select {
-			case <- success:
+			case <- service.Timeout:
 				// no-op
-			case <- time.After(cfg.Timeout * time.Second):
+			case <- time.After(service.Config.Timeout):
 				wg.Done()
 			}
 		}
@@ -145,23 +144,42 @@ func main(){
 	wg.Add(1)
 	go timeout(wg)
 
-	for i := 0; i < cfg.Threads; i++ { // NUM_THREADS should be an ENV VAR
+	for i := 0; i < service.Threads; i++ { // NUM_THREADS should be an ENV VAR
 		go handler(wg)
 	}
 
-	ParseCSVStream(bufio.NewScanner(os.Stdin), input)
+	service.ParseCSVStream(bufio.NewScanner(os.Stdin))
 	wg.Wait()
 	fmt.Println("Elapsed time was: ", time.Since(start))
 }
 
-func ParseCSVStream(scanner *bufio.Scanner, input chan [2]string) {
+type IndexService struct {
+	*Config
+	Input       chan [2]string
+	Timeout     chan bool
+	Client      *http.Client
+}
+
+func NewService(cfg *Config, client *http.Client) *IndexService {
+	input := make(chan [2]string, 1)
+	timeout := make(chan bool, 1)
+
+	return &IndexService{
+		cfg,
+		input,
+		timeout,
+		client,
+	}
+}
+
+func (service *IndexService) ParseCSVStream(scanner *bufio.Scanner) {
 	for scanner.Scan() {
 		line := strings.Split(scanner.Text(), ",")
 		valid := ValidateCSVLine(line)
 		if !valid {
 			continue
 		}
-		input <- [2]string{line[0], line[1]}
+		service.Input <- [2]string{line[0], line[1]}
 	}
 }
 
@@ -193,26 +211,26 @@ func ValidateCSVLine(line []string) bool {
 	return true
 }
 
-func FetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIndex Index, err error) {
-	userResponse, err := GetUserData(httpClient, USERS_URL, userID)
+func (service *IndexService) FetchUserVideoData(userID, videoID string) (userIndex Index, err error) {
+	userResponse, err := service.GetUserData(userID)
 	if err == nil {
 		userIndex.User = userResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	videoResponse, err := GetVideoData(httpClient, VIDEOS_URL, videoID)
+	videoResponse, err := service.GetVideoData(videoID)
 	if err == nil {
 		userIndex.Video = videoResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	err = PostIndexData(httpClient, INDEX_URL, userIndex)
+	err = service.PostIndexData(userIndex)
 	return userIndex, err
 }
 
-func PostIndexData(httpClient *http.Client, indexURL string, userIndex Index) error {
+func (service *IndexService) PostIndexData(userIndex Index) error {
 
 	// should probably pass in pointer for userIndex
 	serializedUserIndex, err := json.Marshal(userIndex)
@@ -220,13 +238,13 @@ func PostIndexData(httpClient *http.Client, indexURL string, userIndex Index) er
 		return err
 	}
 
-	request, err := http.NewRequest("POST", indexURL, bytes.NewBuffer(serializedUserIndex))
+	request, err := http.NewRequest("POST", service.IndexURL, bytes.NewBuffer(serializedUserIndex))
 	if err != nil {
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
 
-	response, err := httpClient.Do(request)
+	response, err := service.Client.Do(request)
 	if err != nil {
 		return err
 	}
@@ -240,16 +258,16 @@ func PostIndexData(httpClient *http.Client, indexURL string, userIndex Index) er
 	return nil
 }
 
-func GetUserData(httpClient *http.Client, usersUrl, userID string) (*UserResponse, error) {
+func  (service *IndexService) GetUserData(userID string) (*UserResponse, error) {
 	userResponse := &UserResponse{}
-	usersURL := fmt.Sprintf("%s/%s", usersUrl, userID)
+	usersURL := fmt.Sprintf("%s/%s", service.UsersURL, userID)
 
 	request, err := http.NewRequest("GET", usersURL, nil)
 	if err != nil {
 		return userResponse, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := service.Client.Do(request)
 	if err != nil {
 		return userResponse, err
 	}
@@ -277,11 +295,11 @@ func GetUserData(httpClient *http.Client, usersUrl, userID string) (*UserRespons
 	return userResponse, nil
 }
 
-func GetVideoData(httpClient *http.Client, videosUrl, videoID string) (*VideoResponse, error) {
+func (service *IndexService) GetVideoData(videoID string) (*VideoResponse, error) {
 	// these urls are attributes on a container struct
 	// GET, POST, ETC, are methods on it
 	videoResponse := &VideoResponse{}
-	videosURL := fmt.Sprintf("%s/%s", videosUrl, videoID)
+	videosURL := fmt.Sprintf("%s/%s", service.VideosURL, videoID)
 
 	request, err := http.NewRequest("GET", videosURL, nil)
 	if err != nil {
@@ -289,7 +307,7 @@ func GetVideoData(httpClient *http.Client, videosUrl, videoID string) (*VideoRes
 	}
 
 	// request.Header.Add("Accept-Encoding", "json")
-	response, err := httpClient.Do(request)
+	response, err := service.Client.Do(request)
 	if err != nil {
 		return videoResponse, err
 	}
@@ -315,4 +333,9 @@ func GetVideoData(httpClient *http.Client, videosUrl, videoID string) (*VideoRes
 		return videoResponse, err
 	}
 	return videoResponse, nil
+}
+
+func(service *IndexService) Cleanup (){
+	close(service.Input)
+	close(service.Timeout)
 }

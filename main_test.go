@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+const (
+	HTTP_CREATED     = http.StatusCreated
+	HTTP_UNAVAILABLE = http.StatusServiceUnavailable
+)
+
 // return a handler that writes a json serialized version of entity
 func jsonHandler(entity interface{}) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -22,15 +27,14 @@ func jsonHandler(entity interface{}) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-const (
-	HTTP_CREATED     = http.StatusCreated
-	HTTP_UNAVAILABLE = http.StatusServiceUnavailable
-)
-
 func statusHandler(status int) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(status)
 	}
+}
+
+func createTestConfig(url string) *Config {
+	return &Config{url, url, url, time.Duration(1), 1}
 }
 
 type csvTestCase struct {
@@ -96,13 +100,16 @@ func TestGetUsers(t *testing.T) {
 		},
 	}
 
-	httpClient := &http.Client{Timeout: time.Second * 10}
-
 	handler := jsonHandler(c.Expected)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	actual, _ := GetUserData(httpClient, tServer.URL, c.ID)
+	service := NewService(
+		createTestConfig(tServer.URL),
+		&http.Client{Timeout: time.Second * 3},
+	)
+
+	actual, _ := service.GetUserData(c.ID)
 	if !reflect.DeepEqual(actual, c.Expected) {
 		t.Errorf(
 			"Unmarshalled value '%v' did not match expected value '%v'\n",
@@ -116,8 +123,11 @@ func TestGetUsersServerDown(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	httpClient := &http.Client{Timeout: time.Second * 10}
-	_, err := GetUserData(httpClient, tServer.URL, "1000")
+	service := NewService(
+		createTestConfig(tServer.URL),
+		&http.Client{Timeout: time.Second * 3},
+	)
+	_, err := service.GetUserData("1000")
 
 	if err == nil {
 		t.Errorf("Expected GetUserData to err on 503 server response, receieved nil")
@@ -149,14 +159,16 @@ func TestGetVideos(t *testing.T) {
 		},
 	}
 
-	httpClient := &http.Client{Timeout: time.Second * 10}
-
 	handler := jsonHandler(c.Expected)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
-
 	defer tServer.Close()
 
-	actual, _ := GetVideoData(httpClient, tServer.URL, c.ID)
+	service := NewService(
+		createTestConfig(tServer.URL),
+		&http.Client{Timeout: time.Second * 3},
+	)
+
+	actual, _ := service.GetVideoData(c.ID)
 	if !reflect.DeepEqual(actual, c.Expected) {
 		t.Errorf(
 			"Unmarshalled value '%v' did not match expected value '%v'\n",
@@ -170,8 +182,11 @@ func TestGetVideosServerDown(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	httpClient := &http.Client{Timeout: time.Second * 10}
-	_, err := GetVideoData(httpClient, tServer.URL, "1000")
+	service := NewService(
+		createTestConfig(tServer.URL),
+		&http.Client{Timeout: time.Second * 3},
+	)
+	_, err := service.GetVideoData("1000")
 	if err == nil {
 		t.Errorf("Expected GetVideoData to err on 503 server response, receieved nil")
 	}
@@ -184,8 +199,12 @@ func TestPostIndex(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	httpClient := &http.Client{Timeout: time.Second * 10}
-	err := PostIndexData(httpClient, tServer.URL, Index{})
+	service := NewService(
+		createTestConfig(tServer.URL),
+		&http.Client{Timeout: time.Second * 3},
+	)
+
+	err := service.PostIndexData(Index{})
 	if err != nil {
 		t.Errorf("Expected TestPostIndex to succeed on 201 server response, receieved err '%v' instead", err)
 	}
@@ -198,8 +217,11 @@ func TestPostIndexServerDown(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	httpClient := &http.Client{Timeout: time.Second * 10}
-	err := PostIndexData(httpClient, tServer.URL, Index{})
+	service := NewService(
+		createTestConfig(tServer.URL),
+		&http.Client{Timeout: time.Second * 3},
+	)
+	err := service.PostIndexData(Index{})
 
 	if err == nil {
 		t.Errorf("Expected PostIndexData to err on 503 server response, receieved nil")

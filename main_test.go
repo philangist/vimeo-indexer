@@ -104,12 +104,12 @@ func TestGetUsers(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	service := NewService(
+	service := NewIndexService(
 		createTestConfig(tServer.URL),
 		&http.Client{Timeout: time.Second * 3},
 	)
 
-	actual, _ := service.GetUserData(c.ID)
+	actual, _ := service.GetUser(c.ID)
 	if !reflect.DeepEqual(actual, c.Expected) {
 		t.Errorf(
 			"Unmarshalled value '%v' did not match expected value '%v'\n",
@@ -123,14 +123,14 @@ func TestGetUsersServerDown(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	service := NewService(
+	service := NewIndexService(
 		createTestConfig(tServer.URL),
 		&http.Client{Timeout: time.Second * 3},
 	)
-	_, err := service.GetUserData("1000")
+	_, err := service.GetUser("1000")
 
 	if err == nil {
-		t.Errorf("Expected GetUserData to err on 503 server response, receieved nil")
+		t.Errorf("Expected GetUser to err on 503 server response, receieved nil")
 	}
 }
 
@@ -163,12 +163,12 @@ func TestGetVideos(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	service := NewService(
+	service := NewIndexService(
 		createTestConfig(tServer.URL),
 		&http.Client{Timeout: time.Second * 3},
 	)
 
-	actual, _ := service.GetVideoData(c.ID)
+	actual, _ := service.GetVideo(c.ID)
 	if !reflect.DeepEqual(actual, c.Expected) {
 		t.Errorf(
 			"Unmarshalled value '%v' did not match expected value '%v'\n",
@@ -182,13 +182,13 @@ func TestGetVideosServerDown(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	service := NewService(
+	service := NewIndexService(
 		createTestConfig(tServer.URL),
 		&http.Client{Timeout: time.Second * 3},
 	)
-	_, err := service.GetVideoData("1000")
+	_, err := service.GetVideo("1000")
 	if err == nil {
-		t.Errorf("Expected GetVideoData to err on 503 server response, receieved nil")
+		t.Errorf("Expected GetVideo to err on 503 server response, receieved nil")
 	}
 }
 
@@ -199,12 +199,12 @@ func TestPostIndex(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	service := NewService(
+	service := NewIndexService(
 		createTestConfig(tServer.URL),
 		&http.Client{Timeout: time.Second * 3},
 	)
 
-	err := service.PostIndexData(Index{})
+	err := service.PostIndex(Index{})
 	if err != nil {
 		t.Errorf("Expected TestPostIndex to succeed on 201 server response, receieved err '%v' instead", err)
 	}
@@ -217,11 +217,11 @@ func TestPostIndexServerDown(t *testing.T) {
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
-	service := NewService(
+	service := NewIndexService(
 		createTestConfig(tServer.URL),
 		&http.Client{Timeout: time.Second * 3},
 	)
-	err := service.PostIndexData(Index{})
+	err := service.PostIndex(Index{})
 
 	if err == nil {
 		t.Errorf("Expected PostIndexData to err on 503 server response, receieved nil")
@@ -229,5 +229,5 @@ func TestPostIndexServerDown(t *testing.T) {
 }
 
 /*
-func TestFetchUserVideoData(){}
+func TestIndexUserVideoData(){}
 */

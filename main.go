@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -107,7 +108,7 @@ func main(){
 	start := time.Now()
 	wg := &sync.WaitGroup{}
 
-	service := NewService(
+	service := NewIndexService(
 		ReadConfigFromEnv(),
 		&http.Client{Timeout: time.Second * 10},
 	)
@@ -116,7 +117,7 @@ func main(){
 	handler := func(wg *sync.WaitGroup) { // rename handler
 		for line := range service.Input {
 			userID, videoID := line[0], line[1]
-			_, err := service.FetchUserVideoData(userID, videoID)
+			_, err := service.IndexUserVideo(userID, videoID)
 			if err == nil {
 				service.Timeout <- true
 				continue
@@ -160,7 +161,7 @@ type IndexService struct {
 	Client      *http.Client
 }
 
-func NewService(cfg *Config, client *http.Client) *IndexService {
+func NewIndexService(cfg *Config, client *http.Client) *IndexService {
 	input := make(chan [2]string, 1)
 	timeout := make(chan bool, 1)
 
@@ -211,26 +212,26 @@ func ValidateCSVLine(line []string) bool {
 	return true
 }
 
-func (service *IndexService) FetchUserVideoData(userID, videoID string) (userIndex Index, err error) {
-	userResponse, err := service.GetUserData(userID)
+func (service *IndexService) IndexUserVideo(userID, videoID string) (userIndex Index, err error) {
+	userResponse, err := service.GetUser(userID)
 	if err == nil {
 		userIndex.User = userResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	videoResponse, err := service.GetVideoData(videoID)
+	videoResponse, err := service.GetVideo(videoID)
 	if err == nil {
 		userIndex.Video = videoResponse.Data
 	} else {
 		return userIndex, err
 	}
 
-	err = service.PostIndexData(userIndex)
+	err = service.PostIndex(userIndex)
 	return userIndex, err
 }
 
-func (service *IndexService) PostIndexData(userIndex Index) error {
+func (service *IndexService) PostIndex (userIndex Index) error {
 
 	// should probably pass in pointer for userIndex
 	serializedUserIndex, err := json.Marshal(userIndex)
@@ -258,62 +259,48 @@ func (service *IndexService) PostIndexData(userIndex Index) error {
 	return nil
 }
 
-func  (service *IndexService) GetUserData(userID string) (*UserResponse, error) {
+func  (service *IndexService) GetUser(userID string) (*UserResponse, error){
 	userResponse := &UserResponse{}
 	usersURL := fmt.Sprintf("%s/%s", service.UsersURL, userID)
 
-	request, err := http.NewRequest("GET", usersURL, nil)
+	bytes, err := service.RequestEntity(usersURL)
 	if err != nil {
 		return userResponse, err
 	}
 
-	response, err := service.Client.Do(request)
-	if err != nil {
-		return userResponse, err
-	}
-	if response.StatusCode != http.StatusOK {
-		return userResponse, fmt.Errorf(
-			"Users service returned unexpected status code %d", response.StatusCode)
-	}
-
-	var reader io.ReadCloser
-	switch response.Header.Get("Content-Encoding") {
-	case "gzip":
-		reader, err = gzip.NewReader(response.Body)
-		if err != nil {
-			return userResponse, err
-		}
-		defer reader.Close()
-	default:
-		reader = response.Body
-	}
-
-	err = json.NewDecoder(reader).Decode(userResponse)
-	if err != nil {
-		return userResponse, err
-	}
+	json.Unmarshal(bytes, userResponse)
 	return userResponse, nil
 }
 
-func (service *IndexService) GetVideoData(videoID string) (*VideoResponse, error) {
-	// these urls are attributes on a container struct
-	// GET, POST, ETC, are methods on it
+func (service *IndexService) GetVideo(videoID string) (*VideoResponse, error){
 	videoResponse := &VideoResponse{}
 	videosURL := fmt.Sprintf("%s/%s", service.VideosURL, videoID)
 
-	request, err := http.NewRequest("GET", videosURL, nil)
+	bytes, err := service.RequestEntity(videosURL)
 	if err != nil {
 		return videoResponse, err
 	}
 
-	// request.Header.Add("Accept-Encoding", "json")
+	json.Unmarshal(bytes, videoResponse)
+	return videoResponse, nil
+}
+
+// maybe retrieve entity? fetch entity?
+func(service *IndexService) RequestEntity(URL string) ([]byte, error){
+	var entity []byte
+
+	request, err := http.NewRequest("GET", URL, nil)
+	if err != nil {
+		return entity, err
+	}
+
 	response, err := service.Client.Do(request)
 	if err != nil {
-		return videoResponse, err
+		return entity, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return videoResponse, fmt.Errorf(
-			"Videos service returned unexpected status code %d", response.StatusCode)
+		return entity, fmt.Errorf(
+			"URL: '%s' returned unexpected status code %d", URL, response.StatusCode)
 	}
 
 	var reader io.ReadCloser
@@ -321,18 +308,14 @@ func (service *IndexService) GetVideoData(videoID string) (*VideoResponse, error
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
-			return videoResponse, err
+			return entity, err
 		}
 		defer reader.Close()
 	default:
 		reader = response.Body
 	}
 
-	err = json.NewDecoder(reader).Decode(videoResponse)
-	if err != nil {
-		return videoResponse, err
-	}
-	return videoResponse, nil
+	return ioutil.ReadAll(reader)
 }
 
 func(service *IndexService) Cleanup (){

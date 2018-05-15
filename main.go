@@ -19,8 +19,8 @@ import (
 const (
 	MEMPROF = "perf/memprof-%s"
 	CPUPROF = "perf/cpuprof-%s"
-	USERS_URL = "http://localhost:8000/users/"
-	VIDEOS_URL = "http://localhost:8001/videos/"
+	USERS_URL = "http://localhost:8000/users"
+	VIDEOS_URL = "http://localhost:8001/videos"
 	INDEX_URL = "http://localhost:8002/index"
 )
 

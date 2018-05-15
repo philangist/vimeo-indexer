@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,7 +20,7 @@ import (
 )
 
 const (
-	CPUPROF    = "perf/cpuprof-%s"  // add CPUPROF flag
+	CPUPROF    = "perf/cpuprof-%s"
 	USERS_URL  = "http://localhost:8000/users"
 	VIDEOS_URL = "http://localhost:8001/videos"
 	INDEX_URL  = "http://localhost:8002/index"
@@ -104,15 +105,54 @@ func ReadConfigFromEnv() *Config {
 	}
 }
 
+type Line [2]string
+
+func NewLine(l []string) (*Line, error) {
+	line := &Line{}
+	if l == nil {
+		return line, errors.New("Error: cannot create line with nil value")
+	}
+
+	if len(l) != 2 {
+		return line, errors.New("Error: line must have exactly 2 values")
+	}
+
+	line[0] = l[0]
+	line[1] = l[1]
+
+	return line, nil
+}
+
+func (l *Line) Validate() bool {
+	userID := l[0]
+	videoID := l[1]
+
+	if len(userID) == 0 || len(videoID) == 0 {
+		return false
+	}
+
+	_, err := strconv.ParseInt(userID, 10, 32)
+	if err != nil {
+		return false
+	}
+
+	_, err = strconv.ParseInt(videoID, 10, 32)
+	if err != nil {
+		return false
+	}
+
+	return true
+}
+
 type IndexService struct {
 	*Config
-	Input       chan [2]string
+	Input       chan Line
 	Timeout     chan bool
 	Client      *http.Client
 }
 
 func NewIndexService(cfg *Config, client *http.Client) *IndexService {
-	input := make(chan [2]string, 1)
+	input := make(chan Line, 1)
 	timeout := make(chan bool, 1)
 
 	return &IndexService{
@@ -127,7 +167,6 @@ func (service *IndexService) Execute(reader io.Reader) error {
 	wg := &sync.WaitGroup{}
 	multiplexer := func(wg *sync.WaitGroup) {
 		for line := range service.Input {
-			fmt.Println("read line", line)
 			userID, videoID := line[0], line[1]
 			err := service.IndexUserVideo(userID, videoID)
 			if err == nil {
@@ -167,48 +206,20 @@ func (service *IndexService) Execute(reader io.Reader) error {
 
 func (service *IndexService) ParseCSVStream(scanner *bufio.Scanner) {
 	for scanner.Scan() {
-		line := strings.Split(scanner.Text(), ",")
-		valid := ValidateCSVLine(line)
+		line, err := NewLine(strings.Split(scanner.Text(), ","))
+		if err != nil {
+			continue
+		}
+		valid := line.Validate()
 		if !valid {
 			continue
 		}
-		service.Input <- [2]string{line[0], line[1]}
+		service.Input <- Line{line[0], line[1]}
 	}
-}
-
-func ValidateCSVLine(line []string) bool {
-	if line == nil {
-		return false
-	}
-	if len(line) != 2 {
-		return false
-	}
-
-	userID := strings.TrimSpace(line[0])
-	videoID := strings.TrimSpace(line[1])
-
-	if len(userID) == 0 || len(videoID) == 0 {
-		return false
-	}
-
-	_, err := strconv.ParseInt(userID, 10, 32)
-	if err != nil {
-		return false
-	}
-
-	_, err = strconv.ParseInt(videoID, 10, 32)
-	if err != nil {
-		return false
-	}
-
-	return true
 }
 
 func (service *IndexService) IndexUserVideo(userID, videoID string) error {
 	var indexRequest IndexRequest
-
-	fmt.Printf("IndexUserVideo.userID is %s\n", userID)
-	fmt.Printf("IndexUserVideo.videoID is %s\n", videoID)
 
 	userResponse, err := service.GetUser(userID)
 	if err != nil {

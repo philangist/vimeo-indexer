@@ -47,7 +47,9 @@ func createTestConfig(url string) *Config {
 type csvTestCase struct {
 	Tag      string
 	Input    []string
-	Expected bool
+	Valid    bool
+	Expected *Line
+
 }
 
 func TestValidateCSVLine(t *testing.T) {
@@ -56,30 +58,44 @@ func TestValidateCSVLine(t *testing.T) {
 		{
 			Tag:      "case 1 - valid ids",
 			Input:    []string{"111111", "111111"},
-			Expected: true,
+			Valid: true,
+			Expected: &Line{"111111", "111111"},
 		},
 		{
 			Tag:      "case 2 - missing video id",
 			Input:    []string{"99999", ""},
-			Expected: false,
+			Valid: false,
+			Expected: &Line{},
 		},
 		{
 			Tag:      "case 3 - empty strings",
 			Input:    []string{"  ", "  "},
-			Expected: false,
+			Valid: false,
+			Expected: &Line{},
 		},
 		{
 			Tag:      "case 4 - non integer ids",
 			Input:    []string{"foo", "bar"},
-			Expected: false,
+			Valid: false,
+			Expected: &Line{},
 		},
 	}
 
 	for _, c := range cases {
 		fmt.Println(c.Tag)
-		actual := ValidateCSVLine(c.Input)
-		if c.Expected != actual {
-			t.Errorf("Actual value '%v' did not match expected value '%v'\n", actual, c.Expected)
+		line, err := NewLine(c.Input)
+		valid := line.Validate()
+		if c.Valid {
+			if ((err != nil) || (!valid)) {
+				t.Errorf("%s: Input %s was unexpectedly parsed as invalid", c.Tag, c.Input)
+				continue
+			}
+
+			if !reflect.DeepEqual(line, c.Expected) {
+				t.Errorf(
+					"%s: Parsed Line values '%v' did not match expected values '%v'\n",
+					c.Tag, line, c.Expected)			
+			}
 		}
 	}
 }
@@ -87,7 +103,7 @@ func TestValidateCSVLine(t *testing.T) {
 type parseCSVStreamTestCase struct {
 	Tag      string
 	Input    string
-	Expected [][2]string
+	Expected []Line
 }
 
 func TestParseCSVStream(t *testing.T) {
@@ -95,24 +111,24 @@ func TestParseCSVStream(t *testing.T) {
 		/*{
 			Tag:      "case 1 - valid ids",
 			Input:    "111111,111111\n222222,222222\n",
-			Expected: [][2]string{
-				[2]string{"111111","111111"},
-				[2]string{"222222","222222"},
+			Expected: []Line{
+				Line{"111111","111111"},
+				Line{"222222","222222"},
 			},
 
 		},
 		{
 			Tag:      "case 2 - invalid ids",
 			Input:    "111111,\nstring,456678\n\n",
-			Expected: [][2]string{},
+			Expected: []Line{},
 
 		},*/
 		{
 			Tag:      "case 3 - mixed valid and invalid ids",
 			Input:    "333333,333333\n,\n567489,567489\nstring,322222\n\n",
-			Expected: [][2]string{
-				[2]string{"333333","333333"},
-				[2]string{"567489","567489"},
+			Expected: []Line{
+				Line{"333333","333333"},
+				Line{"567489","567489"},
 			},
 
 		},
@@ -129,7 +145,7 @@ func TestParseCSVStream(t *testing.T) {
 	for _, c := range cases {
 		fmt.Println(c.Tag)
 		done := make(chan bool)
-		actual := [][2]string{}
+		actual := []Line{}
 		scanner := bufio.NewScanner(strings.NewReader(c.Input))
 		go func(){
 			for {

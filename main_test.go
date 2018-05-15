@@ -19,20 +19,20 @@ const (
 	HTTP_UNAVAILABLE = http.StatusServiceUnavailable
 )
 
-// return a handler that writes a json serialized version of entity
-func jsonHandler(entity interface{}) func(http.ResponseWriter, *http.Request) {
+// return a handler that writes status and a json serialized version of entity
+func mockHandler(status int, entity interface{}) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		serialized, err := json.Marshal(entity)
-		if err != nil {
-			log.Panic(err)
+		if status != 0 {
+			w.WriteHeader(status)
 		}
-		w.Write(serialized)
-	}
-}
 
-func statusHandler(status int) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(status)
+		if entity != nil {
+			serialized, err := json.Marshal(entity)
+			if err != nil {
+				log.Panic(err)
+			}
+			w.Write(serialized)
+		}
 	}
 }
 
@@ -179,7 +179,7 @@ func TestGetUsers(t *testing.T) {
 		},
 	}
 
-	handler := jsonHandler(c.Expected)
+	handler := mockHandler(0, c.Expected)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -199,7 +199,7 @@ func TestGetUsers(t *testing.T) {
 
 func TestGetUsersServerDown(t *testing.T) {
 	fmt.Println("Running TestGetUsersServerDown...")
-	handler := statusHandler(HTTP_UNAVAILABLE)
+	handler := mockHandler(HTTP_UNAVAILABLE, nil)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -240,7 +240,7 @@ func TestGetVideos(t *testing.T) {
 		},
 	}
 
-	handler := jsonHandler(c.Expected)
+	handler := mockHandler(0, c.Expected)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -260,7 +260,7 @@ func TestGetVideos(t *testing.T) {
 
 func TestGetVideosServerDown(t *testing.T) {
 	fmt.Println("Running TestGetVideosServerDown...")
-	handler := statusHandler(HTTP_UNAVAILABLE)
+	handler := mockHandler(HTTP_UNAVAILABLE, nil)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -279,7 +279,7 @@ func TestGetVideosServerDown(t *testing.T) {
 func TestPostIndex(t *testing.T) {
 	fmt.Println("Running TestPostIndexData...")
 
-	handler := statusHandler(HTTP_CREATED)
+	handler := mockHandler(HTTP_CREATED, nil)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -298,7 +298,7 @@ func TestPostIndex(t *testing.T) {
 func TestPostIndexServerDown(t *testing.T) {
 	fmt.Println("Running TestPostIndexServerDown...")
 
-	handler := statusHandler(HTTP_UNAVAILABLE)
+	handler := mockHandler(HTTP_UNAVAILABLE, nil)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -318,6 +318,23 @@ func TestPostIndexServerDown(t *testing.T) {
 -- concurrency tests
 */
 
+type mockable func(status int, value interface{}) func(http.ResponseWriter, *http.Request)
+type handler func(http.ResponseWriter, *http.Request)
+
+type Mock struct {
+	Counter map[string]int
+}
+
+func (m *Mock) Add(name string, fn mockable, status int, param interface{}) handler {
+	count, _ := m.Counter[name]
+	m.Counter[name] = count + 1
+	return fn(status, param)
+}
+
+func (m *Mock) Count(name string) int {
+	count, _ := m.Counter[name]
+	return count
+}
 
 
 func TestIndexServiceExecute(t *testing.T) {
@@ -342,6 +359,7 @@ func TestIndexServiceExecute(t *testing.T) {
 		AudioSampleRate: "128",
 	}
 
+	// set up test servers for users, videos, and index services
 	muxer := http.NewServeMux()
 	tServer := httptest.NewServer(muxer)
 	defer tServer.Close()
@@ -350,6 +368,7 @@ func TestIndexServiceExecute(t *testing.T) {
 	videosURL := fmt.Sprintf("%s/videos", tServer.URL)
 	indexURL  := fmt.Sprintf("%s/index", tServer.URL)
 
+	// create new IndexService instance
 	cfg := &Config{
 		usersURL,
 		videosURL,
@@ -363,16 +382,38 @@ func TestIndexServiceExecute(t *testing.T) {
 	)
 	defer service.Close()
 
+	mock := &Mock{map[string]int{}}
+
+	// register mock handlers for users, videos, and index services.
+	// this will allow us to ensure that each service was called at least once
 	muxer.HandleFunc(
 		fmt.Sprintf("/users/%d", user.ID),
-		jsonHandler(user))
+		mock.Add(
+			"users-get",
+			mockHandler,
+			0,
+			user,
+		))
 
 	muxer.HandleFunc(
 		fmt.Sprintf("/videos/%d", video.ID),
-		jsonHandler(video))
+		mock.Add(
+			"videos-get",
+			mockHandler,
+			0,
+			video,
+		))
 
-	muxer.HandleFunc("/index", statusHandler(HTTP_CREATED))
+	muxer.HandleFunc(
+		"/index",
+		mock.Add(
+			"index-post",
+			mockHandler,
+			HTTP_CREATED,
+			nil,
+		))
 
+	// execute the entire workflow. err should always be nil
 	err := service.Execute(strings.NewReader(
 		fmt.Sprintf("%d,%d\n", user.ID, video.ID),
 	))
@@ -380,6 +421,22 @@ func TestIndexServiceExecute(t *testing.T) {
 		t.Errorf(
 			`Expected IndexService.Execute to run to completion, receieved err '%v' instead`, err)
 	}
-}
 
-func TestCloseChannels(t *testing.T) {}
+	// Test that the expected http handlers are actually called
+	expectations := map[string]int{
+		"users-get": 1,
+		"videos-get": 1,
+		"index-post": 1,
+	}
+
+	for tag, count := range expectations {
+		if mock.Count(tag) != count {
+			t.Errorf(
+				"Expected %s to be called %d time(s). Was actually called: %d time(s)",
+				tag,
+				count,
+				mock.Count(tag),
+			)
+		}
+	}
+}

@@ -157,6 +157,7 @@ func FetchUserVideoData(userID, videoID string, httpClient *http.Client) (userIn
 
 func PostIndexData(httpClient *http.Client, indexURL string, userIndex Index) error {
 
+	// should probably pass in pointer for userIndex
 	serializedUserIndex, err := json.Marshal(userIndex)
 	if err != nil {
 		return err

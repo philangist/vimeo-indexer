@@ -22,10 +22,14 @@ func jsonHandler(entity interface{}) func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-// return a handler that mimics an internal server error
-func status503Handler() func(http.ResponseWriter, *http.Request) {
+const(
+	HTTP_CREATED = http.StatusCreated
+	HTTP_UNAVAILABLE = http.StatusServiceUnavailable
+)
+
+func statusHandler(status int) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
+		w.WriteHeader(status)
 	}
 }
 
@@ -69,7 +73,6 @@ func TestValidateCSVLine(t *testing.T){
 	}
 }
 
-
 type getUserTestCase struct {
 	Tag string
 	ID  string
@@ -109,7 +112,7 @@ func TestGetUsers(t *testing.T){
 
 func TestGetUsersServerDown(t *testing.T){
 	fmt.Println("Running TestGetUsersServerDown...")
-	handler := status503Handler()
+	handler := statusHandler(HTTP_UNAVAILABLE)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -117,7 +120,7 @@ func TestGetUsersServerDown(t *testing.T){
 	_, err := GetUserData(httpClient, tServer.URL, "1000")
 
 	if err == nil {
-		t.Errorf("Expected GetUserData to err on 503, receieved nil")
+		t.Errorf("Expected GetUserData to err on 503 server response, receieved nil")
 	}
 }
 
@@ -127,8 +130,8 @@ type getVideoTestCase struct {
 	Expected *VideoResponse
 }
 
-func TestGetVideosUp(t *testing.T){
-	fmt.Println("Running TestGetVideosUp...")
+func TestGetVideos(t *testing.T){
+	fmt.Println("Running TestGetVideos...")
 	c := getVideoTestCase{
 		Tag: "Case 1 - Basic deserialization",
 		ID:  "1000",
@@ -163,28 +166,35 @@ func TestGetVideosUp(t *testing.T){
 
 func TestGetVideosServerDown(t *testing.T){
 	fmt.Println("Running TestGetVideosServerDown...")
-	handler := status503Handler()
+	handler := statusHandler(HTTP_UNAVAILABLE)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
 	httpClient := &http.Client{Timeout: time.Second * 10}
 	_, err := GetVideoData(httpClient, tServer.URL, "1000")
 	if err == nil {
-		t.Errorf("Expected GetUserData to err on 503, receieved nil")
+		t.Errorf("Expected GetVideoData to err on 503 server response, receieved nil")
 	}
 }
 
-func TestPostIndexData(t *testing.T){
+func TestPostIndex(t *testing.T){
 	fmt.Println("Running TestPostIndexData...")
-	if 1 == 2 {
-		t.Errorf("PLACEHOLDER TEST")
+
+	handler := statusHandler(HTTP_CREATED)
+	tServer := httptest.NewServer(http.HandlerFunc(handler))
+	defer tServer.Close()
+
+	httpClient := &http.Client{Timeout: time.Second * 10}
+	err := PostIndexData(httpClient, tServer.URL, Index{})
+	if err != nil {
+		t.Errorf("Expected TestPostIndex to succeed on 201 server response, receieved err '%v' instead", err)
 	}
 }
 
 func TestPostIndexServerDown(t *testing.T){
 	fmt.Println("Running TestPostIndexServerDown...")
 
-	handler := status503Handler()
+	handler := statusHandler(HTTP_UNAVAILABLE)
 	tServer := httptest.NewServer(http.HandlerFunc(handler))
 	defer tServer.Close()
 
@@ -192,7 +202,7 @@ func TestPostIndexServerDown(t *testing.T){
 	err := PostIndexData(httpClient, tServer.URL, Index{})
 
 	if err == nil {
-		t.Errorf("Expected TestPostIndexServerDown to err on 503, receieved nil")
+		t.Errorf("Expected PostIndexData to err on 503 server response, receieved nil")
 	}
 }
 

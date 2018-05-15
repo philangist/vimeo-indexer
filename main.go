@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	// "runtime/pprof"
@@ -22,11 +23,6 @@ const (
 	USERS_URL  = "http://localhost:8000/users"
 	VIDEOS_URL = "http://localhost:8001/videos"
 	INDEX_URL  = "http://localhost:8002/index"
-)
-
-var (
-	TOTAL_REQUESTS = 0
-	STATUS_CODES   = []int{}
 )
 
 type User struct {
@@ -62,49 +58,110 @@ type Index struct {
 	Video Video `json:"video"`
 }
 
-func main() {
+type Config struct { // cfg fields should be CAPITAL
+	UsersURL string
+	VideosURL string
+	IndexURL string
+	Timeout time.Duration
+	Threads int
+}
+
+func ReadConfigFromEnv() *Config {
+	usersURL := os.Getenv("USERS_URL")
+	if len(usersURL) == 0 {
+		usersURL = USERS_URL
+	}
+
+	videosURL := os.Getenv("VIDEOS_URL")
+	if len(videosURL) == 0 {
+		videosURL = VIDEOS_URL
+	}
+
+	indexURL := os.Getenv("INDEX_URL")
+	if len(indexURL) == 0 {
+		indexURL = INDEX_URL
+	}
+
+	timeout, err := strconv.ParseInt(
+		os.Getenv("TIMEOUT"), 10, 32)
+	if err != nil {
+		log.Panic("Invalid value set for TIMEOUT")
+	}
+
+	threads, err := strconv.ParseInt(
+		os.Getenv("NUM_THREADS"), 10, 32)
+	if err != nil {
+		log.Panic("Invalid value set for NUM_THREADS")
+	}
+
+	return &Config{usersURL, videosURL, indexURL, time.Duration(timeout), int(threads)}
+}
+
+// options
+// timeout, num_threads, users_url, videos_url, index_url
+
+// IndexService(cfg)
+
+func main(){
 	start := time.Now()
+	cfg := ReadConfigFromEnv()
 	httpClient := &http.Client{Timeout: time.Second * 10}
 	wg := &sync.WaitGroup{}
-	inputStream := make(chan [2]string, 1)
-	defer close(inputStream)
 
-	handler := func(wg *sync.WaitGroup) {
+	input := make(chan [2]string, 1)
+	success := make(chan bool, 1)
+
+	defer close(input)
+	defer close(success)
+
+	handler := func(wg *sync.WaitGroup) { // rename handler
+		for line := range input {
+			userID, videoID := line[0], line[1]
+			_, err := FetchUserVideoData(userID, videoID, httpClient)
+			if err == nil {
+				success <- true
+				continue
+			} else {
+				wg.Add(1)
+				go func() {
+					input <- line
+					wg.Done()
+				}()
+			}
+		}
+	}
+
+	timeout := func(wg *sync.WaitGroup) {
 		for {
 			select {
-			case line := <-inputStream:
-				userID, videoID := line[0], line[1]
-				_, err := FetchUserVideoData(userID, videoID, httpClient)
-				if err != nil {
-					wg.Add(1)
-					go func() {
-						inputStream <- line
-						wg.Done()
-					}()
-				}
-			case <-time.After(1 * time.Second): // TIMEOUT should be an ENV VAR
+			case <- success:
+				// no-op
+			case <- time.After(cfg.Timeout * time.Second):
 				wg.Done()
 			}
 		}
 	}
 
-	for i := 0; i < 1; i++ { // NUM_THREADS should be an ENV VAR
-		wg.Add(1)
+	wg.Add(1)
+	go timeout(wg)
+
+	for i := 0; i < cfg.Threads; i++ { // NUM_THREADS should be an ENV VAR
 		go handler(wg)
 	}
-	ParseCSVStream(bufio.NewScanner(os.Stdin), inputStream)
+
+	ParseCSVStream(bufio.NewScanner(os.Stdin), input)
 	wg.Wait()
 	fmt.Println("Elapsed time was: ", time.Since(start))
 }
 
-func ParseCSVStream(scanner *bufio.Scanner, inputStream chan [2]string) {
+func ParseCSVStream(scanner *bufio.Scanner, input chan [2]string) {
 	for scanner.Scan() {
 		line := strings.Split(scanner.Text(), ",")
 		valid := ValidateCSVLine(line)
 		if !valid {
 			continue
 		}
-		inputStream <- [2]string{line[0], line[1]}
+		input <- [2]string{line[0], line[1]}
 	}
 }
 

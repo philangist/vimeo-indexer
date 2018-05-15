@@ -54,7 +54,7 @@ type VideoResponse struct {
 }
 
 // IndexRequest??
-type Index struct {
+type IndexRequest struct {
 	User  User  `json:"user"`
 	Video Video `json:"video"`
 }
@@ -123,10 +123,11 @@ func NewIndexService(cfg *Config, client *http.Client) *IndexService {
 	}
 }
 
-func (service *IndexService) Execute(reader io.Reader) {
+func (service *IndexService) Execute(reader io.Reader) error {
 	wg := &sync.WaitGroup{}
 	multiplexer := func(wg *sync.WaitGroup) {
 		for line := range service.Input {
+			fmt.Println("read line", line)
 			userID, videoID := line[0], line[1]
 			err := service.IndexUserVideo(userID, videoID)
 			if err == nil {
@@ -161,6 +162,7 @@ func (service *IndexService) Execute(reader io.Reader) {
 
 	service.ParseCSVStream(bufio.NewScanner(reader))
 	wg.Wait()
+	return nil
 }
 
 func (service *IndexService) ParseCSVStream(scanner *bufio.Scanner) {
@@ -203,7 +205,10 @@ func ValidateCSVLine(line []string) bool {
 }
 
 func (service *IndexService) IndexUserVideo(userID, videoID string) error {
-	var index Index
+	var indexRequest IndexRequest
+
+	fmt.Printf("IndexUserVideo.userID is %s\n", userID)
+	fmt.Printf("IndexUserVideo.videoID is %s\n", videoID)
 
 	userResponse, err := service.GetUser(userID)
 	if err != nil {
@@ -215,20 +220,25 @@ func (service *IndexService) IndexUserVideo(userID, videoID string) error {
 		return err
 	}
 
-	index.User = userResponse.Data
-	index.Video = videoResponse.Data
+	indexRequest.User = userResponse.Data
+	indexRequest.Video = videoResponse.Data
 
-	err = service.PostIndex(index)
+	err = service.PostIndex(indexRequest)
 	return err
 }
 
-func (service *IndexService) PostIndex (index Index) error {
-	serializedIndex, err := json.Marshal(index)
+func (service *IndexService) PostIndex (indexRequest IndexRequest) error {
+	serializedIndexRequest, err := json.Marshal(indexRequest)
 	if err != nil {
 		return err
 	}
 
-	request, err := http.NewRequest("POST", service.IndexURL, bytes.NewBuffer(serializedIndex))  // why did i use bytes.newbuffer here?
+	request, err := http.NewRequest(
+		"POST",
+		service.IndexURL,
+		bytes.NewBuffer(serializedIndexRequest),
+	)  // why did i use bytes.newbuffer here?
+
 	if err != nil {
 		return err
 	}
@@ -275,19 +285,19 @@ func (service *IndexService) GetVideo(ID string) (*VideoResponse, error){
 }
 
 func(service *IndexService) JSONRequest(URL string) ([]byte, error){
-	var entity []byte
+	var byteStream []byte
 
 	request, err := http.NewRequest("GET", URL, nil)
 	if err != nil {
-		return entity, err
+		return byteStream, err
 	}
 
 	response, err := service.Client.Do(request)
 	if err != nil {
-		return entity, err
+		return byteStream, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return entity, fmt.Errorf(
+		return byteStream, fmt.Errorf(
 			"URL: '%s' returned unexpected status code %d", URL, response.StatusCode)
 	}
 
@@ -296,7 +306,7 @@ func(service *IndexService) JSONRequest(URL string) ([]byte, error){
 	case "gzip":
 		reader, err = gzip.NewReader(response.Body)
 		if err != nil {
-			return entity, err
+			return byteStream, err
 		}
 		defer reader.Close()
 	default:
@@ -313,11 +323,16 @@ func(service *IndexService) Close (){
 
 func main(){
 	start := time.Now()
+
 	service := NewIndexService(
 		ReadConfigFromEnv(),
 		&http.Client{Timeout: time.Second * 10},
 	)
 	defer service.Close()
-	service.Execute(os.Stdin)
+
+	err := service.Execute(os.Stdin)
 	fmt.Println("Elapsed time was: ", time.Since(start))
+	if err != nil {
+		log.Panic(err)
+	}
 }

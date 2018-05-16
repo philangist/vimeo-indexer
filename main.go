@@ -326,12 +326,13 @@ func (service *IndexService) Close() {
 }
 
 func main() {
-	// start := time.Now()
+	start := time.Now()
 	service := NewIndexService(ReadConfigFromEnv(), &http.Client{Timeout: time.Second * 5})
 	defer service.Close()
-	// fmt.Printf(
-	// 	"Running on %d threads with a timeout of %d seconds\n",
-	//	service.Threads, (service.Config.Timeout/time.Second))
+
+	fmt.Printf(
+		"Running on %d threads with a timeout of %d seconds\n",
+		service.Threads, (service.Config.Timeout/time.Second))
 	service.Execute(os.Stdin)
-	// fmt.Println("Elapsed time: ", time.Since(start))
+	fmt.Println("Elapsed time: ", time.Since(start))
 }

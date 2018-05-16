@@ -333,17 +333,14 @@ func(service *IndexService) Close (){
 }
 
 func main(){
-	start := time.Now()
+	// start := time.Now()
 
 	service := NewIndexService(
 		ReadConfigFromEnv(),
 		&http.Client{Timeout: time.Second * 10},
 	)
 	defer service.Close()
+	service.Execute(os.Stdin)
 
-	err := service.Execute(os.Stdin)
-	fmt.Println("Elapsed time was: ", time.Since(start))
-	if err != nil {
-		log.Panic(err)
-	}
+	// fmt.Println("Elapsed time was: ", time.Since(start))
 }

@@ -21,6 +21,7 @@ import (
 
 const (
 	CPUPROF    = "perf/cpuprof-%s"
+	MEMPROF    = "perf/memprof-%s"
 	USERS_URL  = "http://localhost:8000/users"
 	VIDEOS_URL = "http://localhost:8001/videos"
 	INDEX_URL  = "http://localhost:8002/index"
@@ -36,7 +37,7 @@ type User struct {
 }
 
 type UserResponse struct {
-	Data User `json:"data"`
+	Data *User `json:"data"`
 }
 
 type Video struct {
@@ -51,13 +52,12 @@ type Video struct {
 }
 
 type VideoResponse struct {
-	Data Video `json:"data"`
+	Data *Video `json:"data"`
 }
 
-// IndexRequest??
 type IndexRequest struct {
-	User  User  `json:"user"`
-	Video Video `json:"video"`
+	User  *User  `json:"user"`
+	Video *Video `json:"video"`
 }
 
 type Config struct {
@@ -96,13 +96,7 @@ func ReadConfigFromEnv() *Config {
 		log.Panic("Invalid value set for NUM_THREADS")
 	}
 
-	return &Config{
-		usersURL,
-		videosURL,
-		indexURL,
-		time.Duration(timeout) * time.Second,
-		int(threads),
-	}
+	return &Config{usersURL, videosURL, indexURL, time.Duration(timeout) * time.Second, int(threads)}
 }
 
 type Line [2]string
@@ -163,7 +157,7 @@ func NewIndexService(cfg *Config, client *http.Client) *IndexService {
 	}
 }
 
-func (service *IndexService) Execute(reader io.Reader) error {
+func (service *IndexService) Execute(reader io.Reader) {
 	wg := &sync.WaitGroup{}
 	multiplexer := func(wg *sync.WaitGroup) {
 		for line := range service.Input {
@@ -201,7 +195,6 @@ func (service *IndexService) Execute(reader io.Reader) error {
 
 	service.ParseCSVStream(bufio.NewScanner(reader))
 	wg.Wait()
-	return nil
 }
 
 func (service *IndexService) ParseCSVStream(scanner *bufio.Scanner) {
@@ -248,7 +241,7 @@ func (service *IndexService) PostIndex(indexRequest IndexRequest) error {
 		"POST",
 		service.IndexURL,
 		bytes.NewBuffer(serializedIndexRequest),
-	) // why did i use bytes.newbuffer here?
+	)
 
 	if err != nil {
 		return err
@@ -334,11 +327,11 @@ func (service *IndexService) Close() {
 
 func main() {
 	// start := time.Now()
-	service := NewIndexService(
-		ReadConfigFromEnv(),
-		&http.Client{Timeout: time.Second * 10},
-	)
+	service := NewIndexService(ReadConfigFromEnv(), &http.Client{Timeout: time.Second * 5})
 	defer service.Close()
+	// fmt.Printf(
+	// 	"Running on %d threads with a timeout of %d seconds\n",
+	//	service.Threads, (service.Config.Timeout/time.Second))
 	service.Execute(os.Stdin)
-	// fmt.Println("Elapsed time was: ", time.Since(start))
+	// fmt.Println("Elapsed time: ", time.Since(start))
 }

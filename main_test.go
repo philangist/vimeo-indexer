@@ -67,19 +67,25 @@ func TestValidateCSVLine(t *testing.T) {
 			Expected: &Line{},
 		},
 		{
-			Tag:      "case 3 - empty strings",
+			Tag:      "case 3 - missing user id",
+			Input:    []string{"", "99999"},
+			Valid:    false,
+			Expected: &Line{},
+		},
+		{
+			Tag:      "case 4 - empty strings",
 			Input:    []string{"  ", "  "},
 			Valid:    false,
 			Expected: &Line{},
 		},
 		{
-			Tag:      "case 4 - nil input",
+			Tag:      "case 5 - nil input",
 			Input:    nil,
 			Valid:    false,
 			Expected: &Line{},
 		},
 		{
-			Tag:      "case 5 - non integer ids",
+			Tag:      "case 6 - non integer ids",
 			Input:    []string{"foo", "bar"},
 			Valid:    false,
 			Expected: &Line{},
@@ -144,7 +150,7 @@ func TestParseCSVStream(t *testing.T) {
 	)
 	defer service.Close()
 
-	// This test is a little hacky. Need to research more on
+	// this test is a little hacky. Need to research more on
 	// testing channels
 	for _, c := range cases {
 		fmt.Println(c.Tag)
@@ -156,7 +162,7 @@ func TestParseCSVStream(t *testing.T) {
 				select {
 				case line := <-service.Input:
 					actual = append(actual, line)
-				case <-time.After(1 * time.Second):
+				case <-time.After(time.Second):
 					done <- true
 				}
 			}
@@ -188,7 +194,7 @@ func TestGetUsers(t *testing.T) {
 		Tag: "Case 1 - Basic deserialization",
 		ID:  "1000",
 		Expected: &UserResponse{
-			Data: User{
+			Data: &User{
 				ID:       1,
 				FullName: "John Smith",
 				Email:    "john.smith@gmail.com",
@@ -247,7 +253,7 @@ func TestGetVideos(t *testing.T) {
 		Tag: "Case 1 - Basic deserialization",
 		ID:  "1000",
 		Expected: &VideoResponse{
-			Data: Video{
+			Data: &Video{
 				ID:              1,
 				Title:           "Joe Rogan Experience #1114 - Matt Taibbi",
 				Caption:         "Matt Taibbi is a journalist and author...",
@@ -357,7 +363,7 @@ func (m *Mock) Count(name string) int {
 }
 
 func TestIndexServiceExecute(t *testing.T) {
-	// Expected returned objects from /users/:id and /videos/:id
+	// expected returned objects from /users/:id and /videos/:id
 	user := &User{
 		ID:       1,
 		FullName: "John Smith",
@@ -367,7 +373,7 @@ func TestIndexServiceExecute(t *testing.T) {
 		LastIP:   "10.10.10.10",
 	}
 
-	video := Video{
+	video := &Video{
 		ID:              1,
 		Title:           "Joe Rogan Experience #1114 - Matt Taibbi",
 		Caption:         "Matt Taibbi is a journalist and author...",
@@ -392,7 +398,7 @@ func TestIndexServiceExecute(t *testing.T) {
 		usersURL,
 		videosURL,
 		indexURL,
-		1 * time.Second,
+		time.Second,
 		1,
 	}
 	service := NewIndexService(
@@ -432,16 +438,12 @@ func TestIndexServiceExecute(t *testing.T) {
 			nil,
 		))
 
-	// execute the entire workflow. err should always be nil
-	err := service.Execute(strings.NewReader(
+	// execute the entire workflow
+	service.Execute(strings.NewReader(
 		fmt.Sprintf("%d,%d\n", user.ID, video.ID),
 	))
-	if err != nil {
-		t.Errorf(
-			`Expected IndexService.Execute to run to completion, receieved err '%v' instead`, err)
-	}
 
-	// Test that the expected http handlers are actually called
+	// test that the expected http handlers are actually called
 	expectations := map[string]int{
 		"users-get":  1,
 		"videos-get": 1,

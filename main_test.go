@@ -49,7 +49,6 @@ type csvTestCase struct {
 	Input    []string
 	Valid    bool
 	Expected *Line
-
 }
 
 func TestValidateCSVLine(t *testing.T) {
@@ -58,25 +57,31 @@ func TestValidateCSVLine(t *testing.T) {
 		{
 			Tag:      "case 1 - valid ids",
 			Input:    []string{"111111", "111111"},
-			Valid: true,
+			Valid:    true,
 			Expected: &Line{"111111", "111111"},
 		},
 		{
 			Tag:      "case 2 - missing video id",
 			Input:    []string{"99999", ""},
-			Valid: false,
+			Valid:    false,
 			Expected: &Line{},
 		},
 		{
 			Tag:      "case 3 - empty strings",
 			Input:    []string{"  ", "  "},
-			Valid: false,
+			Valid:    false,
 			Expected: &Line{},
 		},
 		{
-			Tag:      "case 4 - non integer ids",
+			Tag:      "case 4 - nil input",
+			Input:    nil,
+			Valid:    false,
+			Expected: &Line{},
+		},
+		{
+			Tag:      "case 5 - non integer ids",
 			Input:    []string{"foo", "bar"},
-			Valid: false,
+			Valid:    false,
 			Expected: &Line{},
 		},
 	}
@@ -86,7 +91,7 @@ func TestValidateCSVLine(t *testing.T) {
 		line, err := NewLine(c.Input)
 		valid := line.Validate()
 		if c.Valid {
-			if ((err != nil) || (!valid)) {
+			if (err != nil) || (!valid) {
 				t.Errorf("%s: Input %s was unexpectedly parsed as invalid", c.Tag, c.Input)
 				continue
 			}
@@ -94,7 +99,7 @@ func TestValidateCSVLine(t *testing.T) {
 			if !reflect.DeepEqual(line, c.Expected) {
 				t.Errorf(
 					"%s: Parsed Line values '%v' did not match expected values '%v'\n",
-					c.Tag, line, c.Expected)			
+					c.Tag, line, c.Expected)
 			}
 		}
 	}
@@ -124,13 +129,12 @@ func TestParseCSVStream(t *testing.T) {
 
 		},*/
 		{
-			Tag:      "case 3 - mixed valid and invalid ids",
-			Input:    "333333,333333\n,\n567489,567489\nstring,322222\n\n",
+			Tag:   "case 3 - mixed valid and invalid ids",
+			Input: "333333,333333\n,\n567489,567489\nstring,322222\n\n",
 			Expected: []Line{
-				Line{"333333","333333"},
-				Line{"567489","567489"},
+				Line{"333333", "333333"},
+				Line{"567489", "567489"},
 			},
-
 		},
 	}
 
@@ -147,18 +151,18 @@ func TestParseCSVStream(t *testing.T) {
 		done := make(chan bool)
 		actual := []Line{}
 		scanner := bufio.NewScanner(strings.NewReader(c.Input))
-		go func(){
+		go func() {
 			for {
 				select {
-				case line := <- service.Input:
+				case line := <-service.Input:
 					actual = append(actual, line)
-				case <- time.After(1 * time.Second) :
+				case <-time.After(1 * time.Second):
 					done <- true
 				}
 			}
 		}()
 		service.ParseCSVStream(scanner)
-		<- done
+		<-done
 		if !reflect.DeepEqual(actual, c.Expected) {
 			t.Errorf(
 				"%s: Parsed CSV values '%v' did not match expected values '%v'\n",
@@ -352,7 +356,6 @@ func (m *Mock) Count(name string) int {
 	return count
 }
 
-
 func TestIndexServiceExecute(t *testing.T) {
 	// Expected returned objects from /users/:id and /videos/:id
 	user := &User{
@@ -382,7 +385,7 @@ func TestIndexServiceExecute(t *testing.T) {
 
 	usersURL := fmt.Sprintf("%s/users", tServer.URL)
 	videosURL := fmt.Sprintf("%s/videos", tServer.URL)
-	indexURL  := fmt.Sprintf("%s/index", tServer.URL)
+	indexURL := fmt.Sprintf("%s/index", tServer.URL)
 
 	// create new IndexService instance
 	cfg := &Config{
@@ -440,7 +443,7 @@ func TestIndexServiceExecute(t *testing.T) {
 
 	// Test that the expected http handlers are actually called
 	expectations := map[string]int{
-		"users-get": 1,
+		"users-get":  1,
 		"videos-get": 1,
 		"index-post": 1,
 	}

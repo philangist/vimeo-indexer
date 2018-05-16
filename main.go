@@ -61,11 +61,11 @@ type IndexRequest struct {
 }
 
 type Config struct {
-	UsersURL string
+	UsersURL  string
 	VideosURL string
-	IndexURL string
-	Timeout time.Duration
-	Threads int
+	IndexURL  string
+	Timeout   time.Duration
+	Threads   int
 }
 
 func ReadConfigFromEnv() *Config {
@@ -146,9 +146,9 @@ func (l *Line) Validate() bool {
 
 type IndexService struct {
 	*Config
-	Input       chan Line
-	Timeout     chan bool
-	Client      *http.Client
+	Input   chan Line
+	Timeout chan bool
+	Client  *http.Client
 }
 
 func NewIndexService(cfg *Config, client *http.Client) *IndexService {
@@ -185,9 +185,9 @@ func (service *IndexService) Execute(reader io.Reader) error {
 	timeout := func(wg *sync.WaitGroup) {
 		for {
 			select {
-			case <- service.Timeout:
+			case <-service.Timeout:
 				// no-op
-			case <- time.After(service.Config.Timeout):
+			case <-time.After(service.Config.Timeout):
 				wg.Done()
 			}
 		}
@@ -238,7 +238,7 @@ func (service *IndexService) IndexUserVideo(userID, videoID string) error {
 	return err
 }
 
-func (service *IndexService) PostIndex (indexRequest IndexRequest) error {
+func (service *IndexService) PostIndex(indexRequest IndexRequest) error {
 	serializedIndexRequest, err := json.Marshal(indexRequest)
 	if err != nil {
 		return err
@@ -248,7 +248,7 @@ func (service *IndexService) PostIndex (indexRequest IndexRequest) error {
 		"POST",
 		service.IndexURL,
 		bytes.NewBuffer(serializedIndexRequest),
-	)  // why did i use bytes.newbuffer here?
+	) // why did i use bytes.newbuffer here?
 
 	if err != nil {
 		return err
@@ -269,7 +269,7 @@ func (service *IndexService) PostIndex (indexRequest IndexRequest) error {
 	return nil
 }
 
-func  (service *IndexService) GetUser(ID string) (*UserResponse, error){
+func (service *IndexService) GetUser(ID string) (*UserResponse, error) {
 	userResponse := &UserResponse{}
 	usersURL := fmt.Sprintf("%s/%s", service.UsersURL, ID)
 
@@ -282,7 +282,7 @@ func  (service *IndexService) GetUser(ID string) (*UserResponse, error){
 	return userResponse, nil
 }
 
-func (service *IndexService) GetVideo(ID string) (*VideoResponse, error){
+func (service *IndexService) GetVideo(ID string) (*VideoResponse, error) {
 	videoResponse := &VideoResponse{}
 	videosURL := fmt.Sprintf("%s/%s", service.VideosURL, ID)
 
@@ -295,7 +295,7 @@ func (service *IndexService) GetVideo(ID string) (*VideoResponse, error){
 	return videoResponse, nil
 }
 
-func(service *IndexService) JSONRequest(URL string) ([]byte, error){
+func (service *IndexService) JSONRequest(URL string) ([]byte, error) {
 	var byteStream []byte
 
 	request, err := http.NewRequest("GET", URL, nil)
@@ -327,20 +327,18 @@ func(service *IndexService) JSONRequest(URL string) ([]byte, error){
 	return ioutil.ReadAll(reader)
 }
 
-func(service *IndexService) Close (){
+func (service *IndexService) Close() {
 	close(service.Input)
 	close(service.Timeout)
 }
 
-func main(){
+func main() {
 	// start := time.Now()
-
 	service := NewIndexService(
 		ReadConfigFromEnv(),
 		&http.Client{Timeout: time.Second * 10},
 	)
 	defer service.Close()
 	service.Execute(os.Stdin)
-
 	// fmt.Println("Elapsed time was: ", time.Since(start))
 }

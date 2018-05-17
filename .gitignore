@@ -1,5 +1,4 @@
 .DS_Store
-*.gif
 challenge-darwin
 build/*
 perf/*

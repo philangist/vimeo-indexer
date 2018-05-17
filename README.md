@@ -18,11 +18,13 @@ Creating network "vimeo-indexer_default" with the default driver
 Creating vimeo-indexer_index_1  ... done
 Creating vimeo-indexer_videos_1 ... done
 Creating vimeo-indexer_users_1  ... done
-Attaching to vimeo-indexer_index_1, vimeo-indexer_users_1, vimeo-indexer_videos_1$ docker-compose up
-# Run the multiplexer
+Attaching to vimeo-indexer_index_1, vimeo-indexer_users_1, vimeo-indexer_videos_1
+# Open a new terminal window and run the multiplexer
 $ export NUM_THREADS=5
 $ export TIMEOUT=3
-$ ./challenge-darwin input -c 100 --header | go run main.go
+$ ./challenge-linux input -c 100 --header | go run main.go
+Running on 5 threads with a timeout of 3 seconds
+Elapsed time:  9.676345979s
 ```
 
 Tests:
@@ -30,7 +32,7 @@ Tests:
 $ go test -v
 ```
 
-__Questions__
+__Design Rationale__
 
 *Was the question/problem clear? Did you feel like something was missing or not explained correctly?*
 - The problem was well defined, but some important details about constraints were left out. The request is to "create a piece of software that collects data from two services and indexes that data through a third service as quickly and efficiently as possible" but without knowledge of what the typical load for our system is the word "efficient" is ambiguous. Specific metrics to define success would've helped with constraining the problem. For example: The service should index 95% of all incoming requests in under 3 seconds, have a memory profile that is performant while running on an AWS t2.medium EC2 instance, and to minimize total bandwith consumed by 50%.
@@ -59,10 +61,10 @@ https://github.com/philangist/vimeo-indexer/commit/c9a82c90035074d4bd1eca115fd79
 *What would you have done differently if you had more time or resources?*
 - I would've fleshed out what the concurrent implementation actually looks like before I started working on it, and I would've also made a better effort to REALLY understand Go's approach to concurrency
 - I'd also work to improve the tests. I'm not clear what the idiomatic way to test channels is (https://github.com/philangist/vimeo-indexer/blob/master/main_test.go#L121) and the end-to-end test I wrote for the IndexService is very verbose (https://github.com/philangist/vimeo-indexer/blob/master/main_test.go#L365).
+- The main.go package can very likely be broken down into smaller modules/packages.
 
 *Are there any bottlenecks with your solution? If so, what are they and
 what can you do to fix them/minimize their impact?*
-INSERT PERF PROFILE INFO HERE
 
 - Yep. With an application like this you'd expect performance bottlenecks around IO and synchronization of concurrent threads of execution. The performance profile validates this assumption as can be seen [here](cpu_usage.gif).
 
@@ -70,18 +72,18 @@ INSERT PERF PROFILE INFO HERE
 
 - The builtin error rate also significantly limits the system's throughput. If our architecture was represented as a weighted digraph, the maximum flow is bounded by the incoming edges to the Users and Videos service vertices.
 
-- There's also the additional overhead of synchronizing and scheduling multiple goroutines to read off the input stream and send data downstream
+- There's also the additional overhead of scheduling multiple goroutines to read off the input stream and request/send data downstream.
 
 Potential Solutions:
-- reduce the amount of information we send back. the /users payload contains a lot of information that's seemingly not relevant to search queries, so do we really need to index their last ipaddress or which language they speak.
+- Reduce the amount of information we send back from the Users service. The payload contains a lot of information that's probably not relevant for search queries, so it's worth questioning if we need to index their last ipaddress or which language they speak.
 
-- consider a different encoding type. decompressing from gzip is the largest memory hog in our application. a cursory google search shows that deflate is about 40% faster than gzip. we also don't have to pay the cost of Go's json.Marshal which uses reflection for type inference?? (is this true)
+- Consider a different encoding type. Decompressing from gzip is the [largest memory hog in our application](heap_usage.gif) and a cursory google search shows that deflate is about 40% faster than gzip.
 
-- use a rpc protocol like thrift or protobuf for communicating among internal services. the payload is typically much smaller and faster than a raw json request.
+- Use a RPC protocol like Apache's Thrift or Google's Procol Buffers for communicating among internal services. The payload is typically much smaller and delivery faster than a raw json request. We also don't have to pay the cost of Go's builtin "encoding/json" package which uses reflection for unmarshalling.
 
-- make network requests to /users and /index async within PostIndexData
+- Make network requests to Users and Videos services async within PostIndexData.
 
-- there are also potential optimizations based on typical user behavior on the platform. do they often upload multiple videos at once? maybe it makes sense for the call to /index to be structures as
+- There's also a whole class of optimizations that can be made based on the typical usage patterns on the platform. For example, if users typically upload multiple videos at once it makes a lot more sense for the Index schema to be structured like
 ```json
 {
     "user": {"user": "info"},
@@ -92,38 +94,38 @@ Potential Solutions:
     ]
 }
 ```
-- horizontal scaling of the number of servers running the /users, /videos, and /index services also. I was starting to see dropped messages on my local machine when I jacked the number of threads up to several hundred, because the other backend services could not keep up with the workload.
+- We can also horizontally scale out the number of servers running the Users, Videos, and Index services. I was starting to see dropped messages on my local machine when I jacked the number of threads POSTing to Index up to several hundred, because it could not keep up with the workload.
 
-- optimizing memory usage. Escape analysis (we want as much data on the stack as possible. benefits of stack = better cache line performance due to locality of reference, we're not chasing pointers around the heap, reduces memory fragmentation which helps the GC), pre-allocate and reuse fixed size buffers/byte arrays in an object pool. take advantage of byte alignment when defining structs. use more performant libraries to replace json marshaling/unmarshaling, request decompression logic
+- Optimizing memory usage. Perform escape analysis of the codebase and try to allocate as much data on the call stack as possible. This will give us better cache line performance since we're not chasing pointers around the heap(locality of reference,), reduce memory fragmentation (and total memory usage), and help lighten the load of the GC, which will lead to shorter and less frequent pauses.)
 
-- Send less data by questioning our assumptions. The most efficient code is that which isn't written, so it's worthwhile to ask are there any queries on the index that could be done in a more conventional datastore. a query like (all videos in the last month from region seattle that are at least 5 minutes with term "foo" in their title or body) can have the `range(video.date)`, `exact(video.region)`, `gte(video.length, 5 minutes)` filtering happen in a db and our index only needs to be aware of the values of title and body.
+- We can also re-allocate and reuse fixed size buffers/byte arrays to reduce copying of data/prevent the heap from growing. Go provides us with sync.Pool a built-in object pool manager, so the cost of implementation should be very low.
+- Take advantage of byte alignment when defining structs to minimize the size of our data structures.
 
-- cache the values of partially successful `user,video` pairs. so if we attempt to get a video id that fails, but it's user id passes, when we retry the indexing again later we'll only have to fetch once.
+- Use more performant external libraries to replace json marshalling and umarshalling, request decompression logic, etc.
 
-- improve the error rate of /users and /videos (biggest win) and /index as well
+- Questioning our assumptions and reduce our scope of work. The most efficient code is code that isn't written in the first place, so it's worthwhile to ask if their is any logic on the search platform that can be ripped out or that should live elsewhere. For example, we can try fo find existing queries on the Index that can be done in a more conventional datastore. A query like "give me all videos in the last month from region seattle that are at least 5 minutes long with term "foo" in their title or body" can have the `range(video.date)`, `exact(video.region)`, `gte(video.length, 5 minutes)` filtering happen in a RDBMS and our index only needs to be aware of the values of title and body.
 
-- from a ux perspective, since bottlenecks will always exists we can be smart about prioritizing requests so users are likely to find the results they want in a timely manner. encoding type information for the behavior that an event in the input stream matches and prioritizing based off that. t. ex: events that are of type create(video) should have a higher weight than update(video.frame_rate)
+- Cache the values of partially successful `user,video` pairs. So if we attempt to get a video that fails, but it's user is successfuly returned, when we see the pair again we'll only have to make one request.
 
+- Lower the error rate of the Users and Videos services (biggest win) and Index as well.
 
-- it's important to keep in mind the optimization costs for many of these changes. it can make it more diffcult for humans to reason about application behavior, as well as make architectural changes due to changing requirements more expensive, so we should always try to maintain a balance between performance and maintainability. Donald Knuth: "Programmers waste enormous amounts of time thinking about, or worrying about, the speed of noncritical parts of their programs, and these attempts at efficiency actually have a strong negative impact when debugging and maintenance are considered. We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. Yet we should not pass up our opportunities in that critical 3%."
+- From a UX perspective, since we know that bottlenecks will always exists, we can be smart about prioritizing requests so that the results user care about are indexed first. Consider a scenario where we add a `type` attribute to every `user,video` pair and schedule outbound requests using type as the sort key. We can then enforce behavior like events that are of `type=create(video)` should have a higher weight than `type=update(video.frame_rate)`.
+
+- It's important to keep in mind the additional complexity costs for some of these optimizations. They can introduce subtle bugs and also make it more diffcult for humans to reason about application behavior, onboard new developers, make architectural changes, etc. We should always maintain a careful balance between performant and maintainable code. Donald Knuth: "Programmers waste enormous amounts of time thinking about, or worrying about, the speed of noncritical parts of their programs, and these attempts at efficiency actually have a strong negative impact when debugging and maintenance are considered. We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. Yet we should not pass up our opportunities in that critical 3%."
 
 *How would the system scale for a larger data set (1 billion+ or a never
 ending stream) or to handle more complex queries or higher volume of
 queries?*
 
+A lot of the failure conditions that emerge as scale increases were identified and addressed in the previous section, but it's worthwhile to call out the following potential issues:
  - scaling for a larger data set:
-    the system starts to degrade in performance for larger data sets. memory usage will likely be the biggest issue, gc pauses will be larger and more frequent. partially because of the nature of the problem (forwarding large amounts of data from one group of services to another), partially because of implementation tradeoffs made at a smaller case. naively retrying every failed request infinitely might work fine for a data set of several hundred thousand or millions, but it quickly becomes too expensive  and because we infinitely retry all failed operations there can be network congestion and increased average latency for "legitimate" requests.
+    The system starts to degrade in performance for larger data sets. memory usage will likely be the biggest issue, gc pauses will be larger and more frequent. partially because of the nature of the problem (forwarding large amounts of data from one group of services to another), partially because of implementation tradeoffs made at a smaller case. Naively retrying every failed request infinitely might work fine for a data set of several hundred thousand or millions, but it quickly becomes too expensive at scale and will increase both network congestion and average latency for "legitimate" requests.
 
- - scaling for more complex/higher volume of queries:
-    we're likely sending too much unneeded data to the data store anyway, the size of documents might. I'd argue that as query volume increases we should really focus on doing a few things really well so we can have stronger guarantees about our system's behavior.
+ - Scaling for more complex/higher volume of queries:
+    Introducing more complex queries necessarily increases the total number of possible failure modes, and increases the variance of request latency.
+    I'd argue that as query volume increases we should really focus on reducing document size (only index the smallest subset of attributes we can get away with) and query types. It's a conservative approach, but doing a few things really well means we can have stronger guarantees about our system's behavior.
 
- - dealing with failure of an instance:
-
- - dealing with failure of our entire cluster:
-
- - we'd likely want to move to a persistent message bus (like kafka) for data integrity guarantees (we want every message to be processed at least once) instead of doing it all in memory with channels
-
- - horizontal scaling of the service, spin up several instances and hide them behind a load balancer
+ - At the scale of billions (or an infinite stream) it becomes important to introduce layers of redundancy for handling complex failure modes. We're likely going to have to spin up several instances of the multiplexer service and hide them behind a load balancer. We'd also likely want to move to a persistent message bus like kafka for data integrity guarantees (we want every message to be processed at least once) instead of trying to do it all in memory with Go channels.
 
 *Anything else you want to share about your solution or the problem :)*
-- This was a really fun project and i put a lot of effort into it. i hope that's reflected in the quality of the work
+- This was a really fun project and I put a lot of effort into it. Hopefully that's reflected in the quality of the work.

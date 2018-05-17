@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -365,9 +364,6 @@ func (m *Mock) Count(name string) int {
 
 func TestIndexServiceExecute(t *testing.T) {
 	fmt.Println("Running TestIndexServiceExecute...")
-	os.Setenv("TIMEOUT", "3") // increase codecov value
-	os.Setenv("NUM_THREADS", "1")
-	ReadConfigFromEnv()
 
 	// expected returned objects from /users/:id and /videos/:id
 	user := &User{

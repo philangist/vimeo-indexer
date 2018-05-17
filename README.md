@@ -10,8 +10,16 @@ __Running it locally__
 Requires a local Docker and Go installation
 
 ```bash
+$ go get github.com/philangist/vimeo-indexer
+$ cd $GOPATH/src/github.com/philangist/vimeo-indexer
+# Spin up 1 local instance for each of the Users, Videos, and Index services
 $ docker-compose up
-# in another terminal window
+Creating network "vimeo-indexer_default" with the default driver
+Creating vimeo-indexer_index_1  ... done
+Creating vimeo-indexer_videos_1 ... done
+Creating vimeo-indexer_users_1  ... done
+Attaching to vimeo-indexer_index_1, vimeo-indexer_users_1, vimeo-indexer_videos_1$ docker-compose up
+# Run the multiplexer
 $ export NUM_THREADS=5
 $ export TIMEOUT=3
 $ ./challenge-darwin input -c 100 --header | go run main.go
@@ -22,59 +30,52 @@ Tests:
 $ go test -v
 ```
 
-__Questions__  
+__Questions__
 
 *Was the question/problem clear? Did you feel like something was missing or not explained correctly?*
-- The problem was well defined, but a few details were left out. The request is to "create a piece of software that collects data from two services and indexes that data through a third service as quickly and efficiently as possible", but a little more context would've been helpful. What does the typical load for our system look like (in other words, what value should i pass in for the -c flag to the `./challenge-linux input -c <LOAD>` command?). I'd also argue that the wording "as quickly and efficiently as possible" is ill-defined, and specific metrics around what success would look like might have been better. For example: We expect the service to index 95% of all incoming requests in under 5 seconds, to have a memory profile that fits this certain use case, minimize total bandwith usage, etc.
-There were also some implementation details that were not defined ahead of time, for example the /users and /index endpoints return a gzip compressed response and that's not indicated in the problem definition.
+- The problem was well defined, but some important details about constraints were left out. The request is to "create a piece of software that collects data from two services and indexes that data through a third service as quickly and efficiently as possible" but without knowledge of what the typical load for our system is the word "efficient" is ambiguous. Specific metrics to define success would've helped with constraining the problem. For example: The service should index 95% of all incoming requests in under 3 seconds, have a memory profile that is performant while running on an AWS t2.medium EC2 instance, and to minimize total bandwith consumed by 50%.
+
+- There was also a specific behavioral quirk of the Users and Videos services that was not defined ahead of time, specifically that the /users and /index endpoints return a gzip compressed response. This was not indicated in the description of their APIs.
 
 *How much time did you spend on each part: understanding, designing, coding, testing?*
 
-- Understanding & design:
-After reading the assessment I wrote a small python script to parse 1000000 input values and see if there were any interesting patterns in the data that could be useful, but the output of the script seemed to be completely random (~10 minutes).
-I then spent the next two days working on other projects and thinking over the possible ways to approach the problem. I knew I'd take a concurrent approach for solving it and since I hadn't used Go's concurrency model before I spent some time watching videos on Go concurrency patterns and came up with a single threaded version of the core solution.
+The  assessment took a much larger time investment than I initially expected, but I wanted to write a high-quality solution I'd be proud of.
 
+Understanding & design:
+- After reading the assessment I wrote a small python script to parse 1000000 input values and see if there were any patterns in the data that could be useful, but the output of the script seemed to be completely random. This took  less than 10 minutes.
+- I then spent the next two days working on other projects and thinking over the possible ways to approach the problem. I knew I'd take a concurrent approach and since I hadn't used Go's concurrency model before I watched a few videos on Go concurrency patterns and drew a design for a single threaded implementation.
 
-- Coding:
-I took about 3 days of working on and off to get to an implementation I thought was respectable. The core solution itself was written fairly early on and took 2-3 hours - https://github.com/philangist/vimeo-indexer/commit/c7e6b9b34063f5fadc16ff61c961aee11d417787 - everything after that has just been iteration and refinement. I did the difficulty of implementing the concurrent approach in Go however , and spent much of sunday fighting deadlocks and race conditions and trying to better understand the language. I had to write out a dead simple version of the core workflow (https://gist.github.com/philangist/d14bc3319e1eb4a9c9f983f6dd461fc0) and then I focused on addressing the entire problem space, and after aggresively simplify my core logic, refactoring, and testing
-
+Coding:
+- It took 3 days of working a few hours each day get to an implementation I thought was respectable. The core solution itself was written within the first and took 2-3 hours - https://github.com/philangist/vimeo-indexer/commit/c7e6b9b34063f5fadc16ff61c961aee11d417787 - everything after that was focused on iteration and refinement. I did have difficulty implementing the concurrent solution however, and spent much of Sunday fighting deadlocks and race conditions and trying to better understand Go's behavior. I had to write out a dead simple version of the concurrent workflow (https://gist.github.com/philangist/d14bc3319e1eb4a9c9f983f6dd461fc0) to clarify my thinking. After that I focused on addressing the entire problem space and edge cases, and after that on aggresively simplify the core logic, refactoring, and testing.
 
 - Testing:
-I was manually testing for the first few days but when I started to approach a stable solution I took about 5-6 hours over 2 nights to write tests
+I was manually testing for the first few days but when I started to see a solid implementation emerge I took about 5-6 hours over 2 nights to write tests
 https://github.com/philangist/vimeo-indexer/commit/1fca7206888ec6b51cb8170569533f2ba49d7447
 https://github.com/philangist/vimeo-indexer/commit/c9a82c90035074d4bd1eca115fd79ec98b2311f9
 
-- It took a larger time investment than I initially expected, but I wanted to write a high-quality solution.
-
-
 *Why did you choose the language to write your solution in?*
-- Because Go is fun to write in! It is a language that was designed specifically for projects of this type; building small, performant networking services with out of the box concurrency and it has a great standard library backing it. The development cycle is also very fast (think tight inner loop) and the tooling around testing and performance was really helpful here
-
+- I chose Go because it is a language that was designed specifically for projects of this type; building small, performant networking services with strong out of the box concurrency primitives. It also doesn't hurt that go has a great standard library backing it. The development feedback cycle is also very fast, and the tooling around testing and performance was really helpful here. Not to mention, Go is really fun to write!
 
 *What would you have done differently if you had more time or resources?*
-- I would've really fleshed out what the concurrent implementation actually looks like before I started working on it, and I would've also made a better effort to REALLY understand Go's approach to concurrency
-- Improve testing (concurrency. race condition here -> https://github.com/philangist/vimeo-indexer/blob/master/main_test.go#L121)
+- I would've fleshed out what the concurrent implementation actually looks like before I started working on it, and I would've also made a better effort to REALLY understand Go's approach to concurrency
+- I'd also work to improve the tests. I'm not clear what the idiomatic way to test channels is (https://github.com/philangist/vimeo-indexer/blob/master/main_test.go#L121) and the end-to-end test I wrote for the IndexService is very verbose (https://github.com/philangist/vimeo-indexer/blob/master/main_test.go#L365).
 
 *Are there any bottlenecks with your solution? If so, what are they and
 what can you do to fix them/minimize their impact?*
 INSERT PERF PROFILE INFO HERE
 
-- Yep. With an application like this you'd expect performance hotspots to primarily be i/o and the overhead costs of managing concurrency and from performance profiling that's definitely the case.
+- Yep. With an application like this you'd expect performance bottlenecks around IO and synchronization of concurrent threads of execution. The performance profile validates this assumption as can be seen [here](cpu_usage.gif).
 
-- the rate at which we can read the input stream from stdin is the first obvious bottleneck
+- The rate at which we can read the input stream from stdin is the first obvious bottleneck, After that communicating over the wire to the Users and Videos services is next, and last is sending data to the Index service. This is compounded by the fact that the Index service can be overwhelmed by too many requests and starts dropping messages.
 
-- sending data over the wire to/from /users and /videos services is the next one
+- The builtin error rate also significantly limits the system's throughput. If our architecture was represented as a weighted digraph, the maximum flow is bounded by the incoming edges to the Users and Videos service vertices.
 
-- last is sending data to /index service which can be overwhelmed by too many requests
+- There's also the additional overhead of synchronizing and scheduling multiple goroutines to read off the input stream and send data downstream
 
-- the error rate also significantly limits the systems overall throughput (if our architecture was a Digraph, the edges to /users and /index would have a much higher cost than any other. how does this affect max flow?)
-
-- there's also the additional overhead of synchronizing multiple goroutines and goroutines blocking each other
-
-__improvements__:
+Potential Solutions:
 - reduce the amount of information we send back. the /users payload contains a lot of information that's seemingly not relevant to search queries, so do we really need to index their last ipaddress or which language they speak.
 
-- consider a different encoding type. decompressing from gzip is the largest memory hog in our application. a cursory google search shows that deflate is about 40% faster than gzip
+- consider a different encoding type. decompressing from gzip is the largest memory hog in our application. a cursory google search shows that deflate is about 40% faster than gzip. we also don't have to pay the cost of Go's json.Marshal which uses reflection for type inference?? (is this true)
 
 - use a rpc protocol like thrift or protobuf for communicating among internal services. the payload is typically much smaller and faster than a raw json request.
 
@@ -93,7 +94,7 @@ __improvements__:
 ```
 - horizontal scaling of the number of servers running the /users, /videos, and /index services also. I was starting to see dropped messages on my local machine when I jacked the number of threads up to several hundred, because the other backend services could not keep up with the workload.
 
-- optimizing memory usage. Escape analysis (we want as much data on the stack as possible. benefits of stack = improved cache hits due to locality of reference, we're not chasing pointers around the heap, reduces memory fragmentation), pre-allocate and reuse fixed size buffers/byte arrays in an object pool. take advantage of byte alignment when defining structs. use more performant libraries to replace json marshaling/unmarshaling, decompressing logic
+- optimizing memory usage. Escape analysis (we want as much data on the stack as possible. benefits of stack = better cache line performance due to locality of reference, we're not chasing pointers around the heap, reduces memory fragmentation which helps the GC), pre-allocate and reuse fixed size buffers/byte arrays in an object pool. take advantage of byte alignment when defining structs. use more performant libraries to replace json marshaling/unmarshaling, request decompression logic
 
 - Send less data by questioning our assumptions. The most efficient code is that which isn't written, so it's worthwhile to ask are there any queries on the index that could be done in a more conventional datastore. a query like (all videos in the last month from region seattle that are at least 5 minutes with term "foo" in their title or body) can have the `range(video.date)`, `exact(video.region)`, `gte(video.length, 5 minutes)` filtering happen in a db and our index only needs to be aware of the values of title and body.
 
@@ -101,9 +102,8 @@ __improvements__:
 
 - improve the error rate of /users and /videos (biggest win) and /index as well
 
-- from a ux perspective, since bottlenecks will always exists we can be smart about prioritizing so users are likely to find the results they want in a timely manner. encoding type information for the behavior that an event in the input stream matches and prioritizing based off that. t. ex: events that are of type create(video) should have a higher weight than update(video.frame_rate)
+- from a ux perspective, since bottlenecks will always exists we can be smart about prioritizing requests so users are likely to find the results they want in a timely manner. encoding type information for the behavior that an event in the input stream matches and prioritizing based off that. t. ex: events that are of type create(video) should have a higher weight than update(video.frame_rate)
 
-- the standard JSON library is also slow because it uses reflection
 
 - it's important to keep in mind the optimization costs for many of these changes. it can make it more diffcult for humans to reason about application behavior, as well as make architectural changes due to changing requirements more expensive, so we should always try to maintain a balance between performance and maintainability. Donald Knuth: "Programmers waste enormous amounts of time thinking about, or worrying about, the speed of noncritical parts of their programs, and these attempts at efficiency actually have a strong negative impact when debugging and maintenance are considered. We should forget about small efficiencies, say about 97% of the time: premature optimization is the root of all evil. Yet we should not pass up our opportunities in that critical 3%."
 
@@ -123,7 +123,7 @@ queries?*
 
  - we'd likely want to move to a persistent message bus (like kafka) for data integrity guarantees (we want every message to be processed at least once) instead of doing it all in memory with channels
 
- - horizontal scaling of the service, spin up several instances and hide them behind a load balance
+ - horizontal scaling of the service, spin up several instances and hide them behind a load balancer
 
 *Anything else you want to share about your solution or the problem :)*
 - This was a really fun project and i put a lot of effort into it. i hope that's reflected in the quality of the work
